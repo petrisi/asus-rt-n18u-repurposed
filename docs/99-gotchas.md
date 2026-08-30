@@ -112,6 +112,25 @@ how tight its own permissions are. Put it on `/jffs`. Do not set
 exist in `/etc/passwd`, and this firmware does not ship one — combine with the
 `/etc` regeneration trap above.
 
+## The firmware automounts your data volume too, under a "(1)" name
+
+Both the firmware's automounter and your own script will try to mount a
+labelled volume. Whichever loses finds `/tmp/mnt/<LABEL>` taken and falls back
+to `/tmp/mnt/<LABEL>(1)`, leaving one device mounted twice:
+
+    /dev/sda1 /tmp/mnt/BTDATA(1) ext4 rw,nodev,relatime,...
+    /dev/sda1 /tmp/mnt/BTDATA    ext4 rw,noatime,...
+
+Harmless to the data — Linux shares one superblock between both mounts — but it
+double-counts in `df` and in the dashboard's disk list, and it gives torrents
+two plausible paths to the same files. `services.sh` treats its own mount as
+authoritative and unmounts any duplicate of the same device elsewhere under
+`/tmp/mnt`.
+
+Note also that the automounter is unreliable in timing: on one boot it had not
+mounted a freshly formatted ext4 volume even after three minutes, and on the
+next it got there first. Do not depend on either outcome.
+
 ## Device nodes are not stable
 
 The USB stick moved from `/dev/sda1` to `/dev/sdb1` across a single

@@ -28,6 +28,11 @@
 # hook fires on every USB mount event and must not stack up loops.
 
 USB_LABEL=ROUTERDATA
+# Optional second volume for bulk data (BitTorrent payloads). The firmware's
+# automounter does NOT pick this up -- verified across a reboot: blkid sees
+# LABEL="BTDATA" but nothing mounts it -- so we mount it ourselves. Absent
+# disk is a silent no-op.
+DATA_LABEL=BTDATA
 LOG=/jffs/services.log
 LOCKDIR=/tmp/services.lock.d
 INTERVAL=60
@@ -52,6 +57,44 @@ find_mp() {
     _dev=$(blkid 2>/dev/null | grep "LABEL=\"$USB_LABEL\"" | cut -d: -f1)
     [ -n "$_dev" ] || return 1
     awk -v d="$_dev" '$1==d {print $2; exit}' /proc/mounts
+}
+
+# Mount a labelled volume at /tmp/mnt/<LABEL> if it exists and is not already
+# mounted. Resolved by label: device nodes shuffle constantly on this box --
+# the boot stick has been sda1, sdb1 and sdc1 across three reboots.
+ensure_data_mount() {
+    _mp="/tmp/mnt/$DATA_LABEL"
+    _d=$(blkid 2>/dev/null | grep "LABEL=\"$DATA_LABEL\"" | cut -d: -f1)
+    [ -n "$_d" ] || return 1
+
+    if ! grep -q " $_mp " /proc/mounts 2>/dev/null; then
+        mkdir -p "$_mp"
+        if mount -t ext4 -o rw,noatime "$_d" "$_mp" 2>/dev/null; then
+            log "mounted $_d ($DATA_LABEL) at $_mp"
+        else
+            log "WARN: $_d ($DATA_LABEL) present but mount failed"
+            return 1
+        fi
+    fi
+
+    # Drop duplicate mounts of the SAME device elsewhere under /tmp/mnt.
+    #
+    # The firmware's automounter also mounts this volume. Whichever of us gets
+    # there second finds /tmp/mnt/<LABEL> taken and falls back to
+    # "/tmp/mnt/<LABEL>(1)", leaving one device mounted twice -- harmless to
+    # the data (Linux shares the superblock) but it double-counts in df and in
+    # the dashboard's disk list, and it gives torrents two plausible paths.
+    # Our mount is the authoritative one because transmission's download-dir
+    # is written against it.
+    awk -v d="$_d" -v keep="$_mp" '$1 == d && $2 != keep && $2 ~ /^\/tmp\/mnt\// {print $2}' \
+        /proc/mounts 2>/dev/null | while read -r _dup; do
+        [ -n "$_dup" ] || continue
+        if umount "$_dup" 2>/dev/null || umount -l "$_dup" 2>/dev/null; then
+            log "removed duplicate mount of $_d at $_dup"
+            rmdir "$_dup" 2>/dev/null
+        fi
+    done
+    return 0
 }
 
 ensure_opt() {
@@ -112,6 +155,7 @@ done
 first=1
 while :; do
     ensure_opt
+    ensure_data_mount
 
     if ensure_account; then
         # A re-added account means any running sshd is now stale: its listener

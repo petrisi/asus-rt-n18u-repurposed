@@ -53,7 +53,7 @@ fi
 
 echo
 echo "=== 3. installing scripts to /jffs (safe, reversible) ==="
-for f in usbmount.sh services.sh killsvc.sh; do
+for f in usbmount.sh services.sh killsvc.sh transmission.sh; do
     [ -f "$f" ] || fail "$f not found - run this from the scripts/ directory"
     cp "$f" "/jffs/$f" && chmod 755 "/jffs/$f"
     say "installed /jffs/$f"
@@ -75,6 +75,14 @@ if [ -d portal ]; then
            Create /jffs/portal/.htdigest (realm rtn18u) to require a login -
            see docs/05-dashboard.md."
     # The history layer is optional: its scripts are silent no-ops without it.
+    if [ -x /opt/bin/transmission-daemon ]; then
+        say "transmission: present (seedbox stage active)"
+        blkid 2>/dev/null | grep -q 'LABEL="BTDATA"' || \
+            warn "no volume labelled BTDATA found. transmission.sh will refuse
+           to start rather than download into tmpfs - see docs/06-bittorrent.md."
+    else
+        say "transmission: absent - seedbox stage will no-op silently."
+    fi
     if [ -x /opt/bin/rrdtool ]; then
         say "rrdtool: present (history layer active)"
     else
@@ -86,7 +94,8 @@ fi
 echo
 echo "=== 4. syntax-checking everything installed ==="
 _bad=0
-for f in /jffs/usbmount.sh /jffs/services.sh /jffs/killsvc.sh /jffs/portal/*.sh; do
+for f in /jffs/usbmount.sh /jffs/services.sh /jffs/killsvc.sh \
+         /jffs/transmission.sh /jffs/portal/*.sh; do
     [ -f "$f" ] || continue
     if sh -n "$f" 2>/dev/null; then say "OK   $f"; else say "FAIL $f"; _bad=1; fi
 done

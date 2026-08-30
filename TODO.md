@@ -27,34 +27,19 @@ Ported from the sibling GT-AC5300 project, in rough dependency order.
 The status dashboard (`docs/05-dashboard.md`) and the rrdtool history layer
 (`docs/07-rrd-history.md`) are **done**. Remaining:
 
-- **BitTorrent seedbox — viable, on a dedicated disk.** Originally declined
-  because the only storage was the boot stick, and `script_usbmount` makes that
-  stick the ignition key for SSH, the sweep, the dashboard and the RRDs.
+The BitTorrent seedbox is **done** — see `docs/06-bittorrent.md`. It runs on a
+dedicated 128 GB volume (`BTDATA`), never on the boot stick.
 
-  A separate 128 GB volume removes that objection entirely. Formatted ext4,
-  labelled `BTDATA`, mounted at `/tmp/mnt/BTDATA`, 117.4 GB usable:
+Remaining there:
 
-  | | measured |
-  |---|---|
-  | sequential read | 28.4 MB/s (228 Mbps) |
-  | random read, 48 distinct 4 MB chunks, cold cache | 38.4 MB/s (307 Mbps) |
-  | sequential write | 21.3 MB/s (171 Mbps) |
-  | CPU idle | 86% |
-  | hash throughput | ~21 MB/s |
-
-  Seeding is read-dominated, and 28-38 MB/s of read is far beyond any domestic
-  upload link. This is not the bottleneck.
-
-  Still to decide before installing anything:
-  - Both USB devices enumerate at **480 Mbps on the EHCI bus**; the xHCI
-    controller (5000 Mbps) has nothing attached. Moving the data disk to the
-    USB 3.0 port would raise the ceiling — but USB 3.0 is a well-known 2.4 GHz
-    interference source, and 2.4 GHz is this router's **only** radio. Measure
-    the Wi-Fi cost before taking the throughput.
-  - `BTDATA` must be mounted at boot. The firmware should automount it by label
-    now that it has a recognised filesystem; verify on the next reboot rather
-    than assuming.
-  - RAM is 256 MB total. Transmission's cache and peer limits need tuning down.
+- **Move the data disk to the USB 3.0 port?** Both devices currently enumerate
+  at 480 Mbps on the EHCI bus; the xHCI controller (5000 Mbps) has nothing
+  attached. Moving it raises the ceiling — but USB 3.0 is a well-known 2.4 GHz
+  interference source and 2.4 GHz is this router's **only** radio. Measure the
+  Wi-Fi cost before taking the throughput.
+- **Upstream port forwarding.** This router sits behind another one, so
+  inbound peers need 51413 forwarded there too, or it will only seed to peers
+  it dials out to.
 
 ## Open questions
 

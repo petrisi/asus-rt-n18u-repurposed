@@ -5,7 +5,9 @@ here, and grep for them before you run anything.
 
 | value | default | where |
 |---|---|---|
-| USB volume label | `ROUTERDATA` | `USB_LABEL` in `scripts/services.sh` |
+| USB volume label (boot) | `ROUTERDATA` | `USB_LABEL` in `scripts/services.sh` |
+| Data volume label | `BTDATA` | `DATA_LABEL` in `scripts/services.sh`, `scripts/transmission.sh` |
+| BitTorrent peer port | `51413` | `PEER_PORT` in `scripts/transmission.sh` |
 | SSH listen address | `192.168.1.1` | `ListenAddress` in `/opt/etc/ssh/sshd_config` |
 | Authorized keys path | `/jffs/.ssh/authorized_keys` | `AuthorizedKeysFile` in `sshd_config` |
 | Service log | `/jffs/services.log` | `LOG` in `scripts/services.sh` |

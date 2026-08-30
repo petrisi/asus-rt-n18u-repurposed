@@ -30,6 +30,8 @@ short version is in [99-gotchas.md](docs/99-gotchas.md).
   ([05-dashboard.md](docs/05-dashboard.md))
 - Optional long-term history via rrdtool — a year in 1.1 MB that never grows
   ([07-rrd-history.md](docs/07-rrd-history.md))
+- A BitTorrent seedbox on a dedicated disk, with the RPC locked to loopback
+  ([06-bittorrent.md](docs/06-bittorrent.md))
 
 ## Start here
 
@@ -41,6 +43,7 @@ short version is in [99-gotchas.md](docs/99-gotchas.md).
 | [03-disable-telemetry.md](docs/03-disable-telemetry.md) | **stopping the call-home services for good** |
 | [04-usb-and-entware.md](docs/04-usb-and-entware.md) | storage and a package manager |
 | [05-dashboard.md](docs/05-dashboard.md) | the status portal |
+| [06-bittorrent.md](docs/06-bittorrent.md) | Transmission, on a second disk |
 | [07-rrd-history.md](docs/07-rrd-history.md) | long-term history (optional) |
 | [99-gotchas.md](docs/99-gotchas.md) | **the platform traps — read this before debugging anything** |
 
