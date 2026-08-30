@@ -1,112 +1,133 @@
 #!/bin/sh
-# Re-establish everything that lives on tmpfs and is therefore lost at boot:
-# the /opt bind mount, the sshd privilege-separation account, and sshd itself.
+# Establishes and then MAINTAINS everything that lives on tmpfs and is lost or
+# destroyed at runtime: the /opt bind mount, the sshd privilege-separation
+# account, and sshd itself.
+#
 # Invoked from /jffs/usbmount.sh (nvram script_usbmount).
 #
 # TO DISABLE: delete this file. The caller is [ -x ] guarded, so a missing
-# file is a silent no-op and the router boots normally with telnet only.
+# file is a silent no-op and the router boots normally with the GUI available.
+#
+# ==================== WHY THIS MAINTAINS RATHER THAN ASSERTS ================
+#
+# An earlier version did its setup once per boot, guarded by a stamp file.
+# That is wrong, and it locked us out of SSH. Plugging in a second USB device
+# does BOTH of these, mid-boot, with no reboot involved:
+#
+#   1. The firmware regenerates /etc/passwd (to set up share users), which
+#      deletes the sshd privsep account. sshd's listener stays up, so the port
+#      still answers, but every new connection dies before the banner:
+#      "kex_exchange_identification: read: Connection reset by peer".
+#
+#   2. Device nodes renumber (the boot stick moved sda -> sdc), so the volume
+#      is unmounted and remounted -- which silently destroys the /tmp/opt bind
+#      mount, taking /opt/sbin/sshd with it.
+#
+# Both are recoverable only if something re-checks them. Hence the loop below.
+# The single-instance lock is a CONCURRENCY guard, not a run-once guard: the
+# hook fires on every USB mount event and must not stack up loops.
 
 USB_LABEL=ROUTERDATA
 LOG=/jffs/services.log
-LOCK=/tmp/services.lock
+LOCKDIR=/tmp/services.lock.d
+INTERVAL=60
 
-[ -f "$LOCK" ] && exit 0
-touch "$LOCK"
+# The hook fires on every USB mount event. One maintenance loop is enough.
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    exit 0
+fi
+trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT INT TERM
 
 [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 65536 ] && rm -f "$LOG"
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 
+# Entware binaries load the wrong libc and die silently if rc's
+# LD_LIBRARY_PATH is inherited; rc.func discards stderr, so there is no
+# message at all. This is why /opt works by hand and not from boot.
+unset LD_LIBRARY_PATH LD_PRELOAD
+
+# Resolve the volume by LABEL, never by device node: it moved from sda1 to
+# sdb1 across one replug, and to sdc1 when a second disk was attached.
+find_mp() {
+    _dev=$(blkid 2>/dev/null | grep "LABEL=\"$USB_LABEL\"" | cut -d: -f1)
+    [ -n "$_dev" ] || return 1
+    awk -v d="$_dev" '$1==d {print $2; exit}' /proc/mounts
+}
+
+ensure_opt() {
+    grep -q " /tmp/opt " /proc/mounts 2>/dev/null && return 0
+    _mp=$(find_mp)
+    [ -n "$_mp" ] || return 1
+    [ -d "$_mp/entware" ] || return 1
+    mkdir -p /tmp/opt
+    mount -o bind "$_mp/entware" /tmp/opt 2>/dev/null || return 1
+    log "bound $_mp/entware -> /tmp/opt"
+    return 0
+}
+
+# Idempotent, and re-checked every pass: the firmware deletes this account
+# whenever it regenerates /etc/passwd, which USB hotplug triggers.
+# Sets READDED=1 when it had to recreate the account, so the caller knows a
+# running sshd is now stale and must be restarted rather than left alone.
+ensure_account() {
+    READDED=0
+    grep -q '^sshd:' /etc/passwd || {
+        echo 'sshd:x:22:22:sshd privsep:/var/empty:/bin/false' >> /etc/passwd
+        READDED=1
+    }
+    grep -q '^sshd:' /etc/group || echo 'sshd:x:22:' >> /etc/group
+    [ -d /var/empty ] || { mkdir -p /var/empty; chmod 755 /var/empty; }
+    [ "$READDED" -eq 1 ] && log "sshd privsep account was missing, re-added"
+    grep -q '^sshd:' /etc/passwd
+}
+
+# A live listener is NOT proof of a working sshd: if the account was deleted
+# after sshd started, the socket still accepts and every child dies at
+# privsep. So restart whenever the account had to be re-added.
+ensure_sshd() {
+    [ -x /opt/sbin/sshd ] || return 1
+    if [ "$1" = "force" ] || ! pidof sshd >/dev/null 2>&1; then
+        killall sshd 2>/dev/null
+        sleep 1
+        /opt/sbin/sshd -t 2>>"$LOG" || { log "sshd config test failed"; return 1; }
+        /opt/sbin/sshd 2>>"$LOG" && log "sshd started, pid $(pidof sshd)"
+    fi
+    pidof sshd >/dev/null 2>&1
+}
+
 log "=== services start, uptime $(cut -d' ' -f1 /proc/uptime) ==="
 
-# 1. Locate the volume by LABEL, never by device node: the stick moved from
-#    /dev/sda1 to /dev/sdb1 across a single replug on this hardware.
-MP=""
+# Wait for br0 to hold the LAN address: sshd binds it explicitly.
+LANIP=$(nvram get lan_ipaddr 2>/dev/null); [ -z "$LANIP" ] && LANIP=192.168.1.1
 i=0
 while [ "$i" -lt 30 ]; do
-    dev=$(blkid 2>/dev/null | grep "LABEL=\"$USB_LABEL\"" | cut -d: -f1)
-    if [ -n "$dev" ]; then
-        MP=$(awk -v d="$dev" '$1==d {print $2; exit}' /proc/mounts)
-        [ -n "$MP" ] && break
-    fi
+    ifconfig br0 2>/dev/null | grep -q "$LANIP" && break
     sleep 2
     i=$((i + 1))
 done
 
-if [ -z "$MP" ]; then
-    log "FATAL: volume LABEL=$USB_LABEL not mounted after 60s, giving up"
-    exit 1
-fi
-log "volume $USB_LABEL mounted at $MP (device $dev)"
-
-# 2. /opt is a symlink to tmp/opt, and /tmp is tmpfs -- recreate and re-bind.
-if [ ! -d "$MP/entware" ]; then
-    log "FATAL: $MP/entware missing -- is Entware installed?"
-    exit 1
-fi
-mkdir -p /tmp/opt
-if grep -q " /tmp/opt " /proc/mounts; then
-    log "/tmp/opt already bound"
-else
-    mount -o bind "$MP/entware" /tmp/opt && log "bound $MP/entware -> /tmp/opt" \
-        || { log "FATAL: bind mount failed"; exit 1; }
-fi
-
-# 3-5. OpenSSH needs its privilege-separation account, but the firmware
-#      REGENERATES /etc/passwd during boot -- observed rewriting it one second
-#      after this hook first added the account at 25s uptime. So adding it once
-#      is not enough: add, verify, and retry until sshd actually starts.
-#      /etc is a symlink into tmpfs, so this must happen on every boot.
-#      UsePrivilegeSeparation was removed from OpenSSH; the account is not
-#      optional.
+# --- maintenance loop -----------------------------------------------------
 #
-#      LD_LIBRARY_PATH is cleared for the whole block: rc exports it pointing
-#      at the firmware's libraries, which beats the DT_RUNPATH in every Entware
-#      binary, so they load the wrong libc and die silently (rc.func discards
-#      stderr). This is why /opt binaries work by hand but not from boot.
-(
-    unset LD_LIBRARY_PATH LD_PRELOAD
+# Runs for the life of the boot. Cheap: two greps and a mount check per pass.
+first=1
+while :; do
+    ensure_opt
 
-    # sshd binds ListenAddress 192.168.1.1 -- wait for br0 to hold it.
-    i=0
-    while [ "$i" -lt 30 ]; do
-        ifconfig br0 2>/dev/null | grep -q "192.168.1.1" && break
-        sleep 2
-        i=$((i + 1))
-    done
-
-    if [ ! -x /opt/sbin/sshd ]; then
-        log "FATAL: /opt/sbin/sshd not found"
-        exit 1
+    if ensure_account; then
+        # A re-added account means any running sshd is now stale: its listener
+        # survives but every child dies at privsep. Force a restart in that
+        # case; otherwise only start it if it is not running at all.
+        if [ "$READDED" -eq 1 ]; then
+            ensure_sshd force
+        else
+            ensure_sshd
+        fi
     fi
 
-    i=0
-    while [ "$i" -lt 24 ]; do
-        if pidof sshd >/dev/null 2>&1; then
-            log "sshd running, pid $(pidof sshd)"
-            break
-        fi
+    if [ "$first" -eq 1 ]; then
+        pidof sshd >/dev/null 2>&1 && log "initial setup complete, uptime $(cut -d' ' -f1 /proc/uptime)"
+        first=0
+    fi
 
-        grep -q '^sshd:' /etc/passwd || \
-            echo 'sshd:x:22:22:sshd privsep:/var/empty:/bin/false' >> /etc/passwd
-        grep -q '^sshd:' /etc/group || echo 'sshd:x:22:' >> /etc/group
-        mkdir -p /var/empty && chmod 755 /var/empty
-
-        # Verify rather than assume -- the firmware may have wiped it again.
-        if grep -q '^sshd:' /etc/passwd && /opt/sbin/sshd -t 2>/dev/null; then
-            /opt/sbin/sshd 2>>"$LOG"
-            sleep 2
-            if pidof sshd >/dev/null 2>&1; then
-                log "sshd started on attempt $((i + 1)), pid $(pidof sshd)"
-                break
-            fi
-        fi
-
-        sleep 10
-        i=$((i + 1))
-    done
-
-    pidof sshd >/dev/null 2>&1 || log "FATAL: sshd never started after $i attempts"
-)
-
-log "=== services done, uptime $(cut -d' ' -f1 /proc/uptime) ==="
-exit 0
+    sleep "$INTERVAL"
+done

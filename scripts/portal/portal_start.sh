@@ -29,6 +29,16 @@ mkdir -p "$RUN"
 
 log() { echo "$(date '+%F %T') $*" >> "$RUN/portal.log"; }
 
+# Single instance. script_usbmount fires on EVERY USB mount event, not just at
+# boot, so plugging in a second disk previously started a rival supervisor:
+# two loops each killing and restarting the other's lighttpd and collector.
+# Observed with pids 480 and 467 running simultaneously.
+if ! mkdir "$RUN/.portal.lock.d" 2>/dev/null; then
+    log "another portal_start.sh is already running, exiting"
+    exit 0
+fi
+trap 'rmdir "$RUN/.portal.lock.d" 2>/dev/null' EXIT INT TERM
+
 # lighttpd modules live in /usr/lib on this firmware, NOT /usr/lib/lighttpd,
 # which is the default the binary would otherwise look in.
 write_conf() {

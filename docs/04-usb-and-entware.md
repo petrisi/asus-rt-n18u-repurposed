@@ -9,13 +9,19 @@ It lives on the USB stick. `/jffs` is small NAND you will never reflash.
 
 ## Format the stick
 
-**ext3 is fine — and ext4 is not available.** This firmware ships only:
+**ext3 is fine, and the firmware cannot create ext4 — but the kernel mounts
+it.** The shipped tools are only:
 
     /sbin/mkfs.ext2   /sbin/mkfs.ext3   /sbin/mke2fs   /sbin/tune2fs
 
-The sibling project specifies ext4, but the properties that actually matter —
-real Unix permissions and symlinks — are equally present in ext3. Do not
-reformat a working ext3 stick for the version number.
+`ext4` is nonetheless in `/proc/filesystems` with the module loaded, so an ext4
+volume created elsewhere — or by Entware's `e2fsprogs`, which provides
+`mkfs.ext4` — mounts normally. See the feature-compatibility trap in
+[99-gotchas.md](99-gotchas.md) before creating one.
+
+For the boot stick, ext3 is entirely adequate: the properties that matter are
+real Unix permissions and symlinks, and both are present. Do not reformat a
+working ext3 stick for the version number.
 
     mkfs.ext3 -L ROUTERDATA /dev/sda1     # destructive
 

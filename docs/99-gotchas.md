@@ -43,6 +43,52 @@ up to four minutes.
 The general form of this mistake — logging success because a command did not
 return an error — is worth watching for everywhere on this platform.
 
+## USB hotplug regenerates /etc/passwd and breaks bind mounts
+
+Plugging in a second USB device does two destructive things mid-boot, with no
+reboot involved:
+
+1. The firmware **regenerates `/etc/passwd`** (setting up share users), which
+   deletes the `sshd` privilege-separation account. sshd's listener survives,
+   so the port still answers, but every new connection dies before the banner:
+
+       kex_exchange_identification: read: Connection reset by peer
+
+2. **Device nodes renumber** — the boot stick moved `sda` -> `sdc` — so the
+   volume is unmounted and remounted, which silently destroys any bind mount
+   onto it. `/tmp/opt` disappears and `/opt/sbin/sshd` stops existing.
+
+Anything that sets these up **once per boot will lock you out.** State that the
+firmware can destroy at runtime must be *maintained*, not asserted once:
+`scripts/services.sh` re-checks the account and the bind mount every 60s and
+force-restarts sshd when it had to recreate the account, because a running sshd
+with a deleted account is broken but looks healthy.
+
+## script_usbmount fires on EVERY mount event, not just at boot
+
+Which means every stage it launches needs a single-instance guard. Without one,
+inserting a second disk started a rival `portal_start.sh` — two supervisors
+each killing and restarting the other's lighttpd and collector (observed as
+pids 480 and 467 running together). Use an atomic `mkdir` lock released by a
+trap, not a stamp file.
+
+## Modern mkfs.ext4 builds filesystems this kernel cannot mount
+
+Entware's e2fsprogs is 1.47, whose ext4 defaults include `64bit`,
+`metadata_csum` and `orphan_file`. The 2.6.36 kernel here supports none of
+them, and the only symptom is:
+
+    mount: mounting /dev/sdb1 on /tmp/mnt/BTDATA failed: Invalid argument
+
+Disable them explicitly, and note that a **positive `-O` list adds to the
+defaults rather than replacing them** — the `^` prefix is required:
+
+    mkfs.ext4 -O ^64bit,^metadata_csum,^orphan_file -F /dev/sdX1
+
+A format of a 128 GB volume takes ~6 minutes here, so validate the option set
+on a small image file first: `mke2fs` works on a regular file, and mounting it
+with `-o loop` is a definitive test that beats reading feature strings.
+
 ## The rootfs cannot be written, at all
 
     # mount -o remount,rw / ; touch /usr/sbin/.wtest
@@ -127,7 +173,7 @@ zeroes that look like idle links. Do the maths in `awk`, which uses doubles.
 
 This is a thinner busybox than the GT-AC5300's. Absent, among others:
 
-    id      od      timeout
+    id      od      timeout      uniq
 
 `timeout` in particular has no replacement, and bounding a call that can hang
 is not optional here — see the `wl_to()` helper in
