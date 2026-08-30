@@ -43,6 +43,12 @@ are not immediately overwritten. The supervision loop re-applies them every
 
 Then browse to `http://192.168.1.1:8080/`.
 
+**The first sample takes about 5 seconds.** The collector runs its `wl`
+slow-sample and then waits one interval before writing, so that the first
+emitted rates are real deltas rather than fabricated zeroes. During that window
+`/status.json` 404s and the page shows placeholders. This is expected once per
+boot; it is not a fault.
+
 ## Platform differences from the GT-AC5300 version
 
 Four things needed changing, all verified on the device:
@@ -102,11 +108,24 @@ the single instance — verified:
 
 ## Two things worth keeping
 
-**Judge liveness by data freshness, not process existence.** A hung collector
-stays in the process table indefinitely and keeps serving a perfectly valid,
-perfectly frozen `status.json`. The supervisor restarts on the age of that
-file; the page separately compares the sample timestamp against the browser
-clock and shows a **data stale** badge rather than a chart that looks live.
+**Judge liveness by data freshness, not just process existence.** A hung
+collector stays in the process table indefinitely and keeps serving a perfectly
+valid, perfectly frozen `status.json`. The page compares the sample timestamp
+against the browser clock and shows a **data stale** badge rather than a chart
+that looks live.
+
+The supervisor watches *both* signals, because they catch different failures:
+
+| signal | failure it catches | detection time |
+|---|---|---|
+| collector pid absent | the collector **died** | one poll, ~30 s |
+| `status.json` age > `STALE` | the collector **hung** | ~150-180 s |
+
+Freshness alone would leave a dead collector unnoticed for up to `STALE`
+seconds; process-existence alone is the mistake that left the sibling project
+with three days of frozen graphs. Both are cheap, so check both. Verified by
+`kill -9` (restarted in 31 s) and by `kill -STOP`, which leaves the process in
+the table while it stops writing — the exact shape of the original outage.
 
 **Bound everything that reads `/proc` or calls `wl`.** `wl` ioctls can block
 indefinitely against this driver. A blocked collector does not crash — it

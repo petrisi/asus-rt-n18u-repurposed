@@ -79,7 +79,16 @@ start_collector() {
     log "collector started, pid $!"
 }
 
-kill_collector() { killall portal_collector.sh 2>/dev/null; }
+# SIGTERM first, then SIGKILL. The second is not belt-and-braces: a collector
+# hung by SIGSTOP never handles SIGTERM and stays in state T indefinitely, so
+# a TERM-only kill LEAKS one stopped process per hang and pidof keeps matching
+# it. SIGKILL is delivered regardless of stop state. Found by kill -STOP
+# testing, not by reasoning.
+kill_collector() {
+    killall portal_collector.sh 2>/dev/null
+    sleep 1
+    killall -9 portal_collector.sh 2>/dev/null
+}
 
 lighttpd_running() { pidof lighttpd >/dev/null 2>&1; }
 
@@ -117,21 +126,27 @@ while :; do
 
     lighttpd_running || { log "lighttpd not running, restarting"; start_lighttpd; }
 
-    if [ -f "$JSON" ]; then
+    # Two independent signals, because they catch different failures:
+    #   - process absent  -> the collector DIED. Caught immediately.
+    #   - data stale      -> the collector HUNG. It is still in the process
+    #                        table and still serving a valid, frozen file, so
+    #                        only the timestamp reveals it.
+    # Checking only the first is the mistake the sibling project made (three
+    # days of frozen graphs). Checking only the second leaves a dead collector
+    # unnoticed for up to $STALE seconds.
+    if ! collector_running; then
+        log "collector process gone, restarting"
+        start_collector
+    elif [ -f "$JSON" ]; then
         _now=$(date +%s)
         _mod=$(date -r "$JSON" +%s 2>/dev/null)
-        if [ -z "$_mod" ]; then
-            # busybox date without -r: fall back to process check only
-            collector_running || { log "collector gone, restarting"; start_collector; }
-        else
+        if [ -n "$_mod" ]; then
             _age=$((_now - _mod))
             if [ "$_age" -gt "$STALE" ]; then
-                log "status.json stale (${_age}s), restarting collector"
+                log "status.json stale (${_age}s) but collector alive - hung, restarting"
                 kill_collector; sleep 1; start_collector
             fi
         fi
-    else
-        collector_running || { log "no status.json and no collector, starting"; start_collector; }
     fi
 
     ensure_fw

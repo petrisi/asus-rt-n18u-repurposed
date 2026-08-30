@@ -95,6 +95,28 @@ the variable.
 
     ( unset LD_LIBRARY_PATH LD_PRELOAD ; /opt/bin/whatever )
 
+## A hung process does not answer SIGTERM
+
+`killall foo` sends SIGTERM, which a stopped or otherwise wedged process never
+handles. It stays in state `T`, `pidof` keeps matching it, and every restart
+leaks another one:
+
+    2673 admin  T  /bin/sh /jffs/portal/portal_collector.sh   <- "killed" 3 minutes ago
+    3360 admin  S  /bin/sh /jffs/portal/portal_collector.sh   <- the replacement
+
+Since the whole point of the restart is that the process is *not responding*,
+SIGTERM is the wrong tool for exactly the case you are handling. Send TERM,
+wait, then KILL:
+
+    killall foo 2>/dev/null; sleep 1; killall -9 foo 2>/dev/null
+
+SIGKILL is delivered regardless of stop state. Note that a process wedged in
+uninterruptible sleep (state `D`, which is what a blocked `wl` ioctl actually
+produces) will not die even then — which is the real reason to bound those
+calls rather than rely on cleaning up afterwards.
+
+This was found by `kill -STOP` testing the supervisor, not by reading the code.
+
 ## Shell arithmetic overflows silently at 2^31
 
 busybox `ash` truncates with no error. Interface byte counters pass 2^31 within
