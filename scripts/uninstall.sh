@@ -24,14 +24,23 @@ say "aae_disable_force = $(nvram get aae_disable_force)"
 say "aae_enable        = $(nvram get aae_enable)"
 
 echo
-echo "=== 3. removing scripts and logs ==="
+echo "=== 3. stopping the dashboard ==="
+killall portal_start.sh portal_collector.sh 2>/dev/null
+killall lighttpd 2>/dev/null
+say "portal processes stopped (iptables rules clear at the next reboot)"
+
+echo
+echo "=== 4. removing scripts and logs ==="
 for f in /jffs/usbmount.sh /jffs/services.sh /jffs/killsvc.sh \
          /jffs/services.log /jffs/killsvc.log; do
     [ -e "$f" ] && rm -f "$f" && say "removed $f"
 done
+if [ -d /jffs/portal ]; then
+    rm -rf /jffs/portal && say "removed /jffs/portal"
+fi
 
 echo
-echo "=== done ==="
+echo "=== 5. done ==="
 say "Left alone deliberately:"
 say "  /jffs/.ssh/authorized_keys  - your key, remove by hand if you want it gone"
 say "  Entware on the USB stick    - delete the entware/ directory to remove"

@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RT-N18U status</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --ink:#16191d; --dim:#6b7280; --line:#e3e6ea;
+  --accent:#2563eb; --rx:#2563eb; --tx:#7c3aed; --ok:#15803d; --warn:#b45309; --bad:#b91c1c;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#101317; --panel:#171b21; --ink:#e6e9ee; --dim:#9aa3af; --line:#262c35;
+    --accent:#60a5fa; --rx:#60a5fa; --tx:#a78bfa; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:baseline;
+  padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
+.meta{color:var(--dim);font-size:12.5px}
+.grow{flex:1}
+#stale{display:none;background:var(--bad);color:#fff;padding:2px 9px;border-radius:99px;
+  font-size:12px;font-weight:600}
+#stale.on{display:inline-block}
+main{padding:16px;display:grid;gap:14px;
+  grid-template-columns:repeat(auto-fit,minmax(290px,1fr));max-width:1500px;margin:0 auto}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+section h2{margin:0 0 11px;font-size:11.5px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--dim);font-weight:650}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:11px}
+.tile .v{font-size:21px;font-weight:640;font-variant-numeric:tabular-nums;line-height:1.15}
+.tile .l{color:var(--dim);font-size:11.5px;margin-top:1px}
+.bar{height:6px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:6px}
+.bar>i{display:block;height:100%;background:var(--accent);border-radius:99px;transition:width .3s}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--dim);font-weight:600;font-size:11.5px;padding:4px 6px 4px 0}
+td{padding:4px 6px 4px 0;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+td.mono,th.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+.wrap{overflow-x:auto}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--dim);margin-bottom:6px}
+.legend b{font-weight:600}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+svg{display:block;width:100%;height:78px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px}
+.kv dt{color:var(--dim)}
+.kv dd{margin:0;font-variant-numeric:tabular-nums;text-align:right}
+.empty{color:var(--dim);font-size:12.5px;padding:6px 0}
+footer{padding:10px 18px 26px;color:var(--dim);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="model">RT-N18U</h1>
+  <span class="meta" id="hostmeta"></span>
+  <span class="grow"></span>
+  <span id="stale">data stale</span>
+  <span class="meta" id="clock"></span>
+</header>
+
+<main>
+  <section>
+    <h2>System</h2>
+    <div class="tiles">
+      <div class="tile"><div class="v" id="cpu">–</div><div class="l">CPU</div>
+        <div class="bar"><i id="cpubar" style="width:0"></i></div></div>
+      <div class="tile"><div class="v" id="ctemp">–</div><div class="l">CPU temp</div></div>
+      <div class="tile"><div class="v" id="memv">–</div><div class="l">Memory</div>
+        <div class="bar"><i id="membar" style="width:0"></i></div></div>
+      <div class="tile"><div class="v" id="ctn">–</div><div class="l">Conntrack</div></div>
+    </div>
+    <dl class="kv" style="margin-top:12px">
+      <dt>Load</dt><dd id="load">–</dd>
+      <dt>Uptime</dt><dd id="uptime">–</dd>
+      <dt>Context switches</dt><dd id="ctxt">–</dd>
+      <dt>Interrupts</dt><dd id="intr">–</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>WAN throughput</h2>
+    <div class="legend"><span><i class="sw" style="background:var(--rx)"></i>down <b id="wanrx">–</b></span>
+      <span><i class="sw" style="background:var(--tx)"></i>up <b id="wantx">–</b></span></div>
+    <svg id="wansvg" viewBox="0 0 300 78" preserveAspectRatio="none"></svg>
+  </section>
+
+  <section>
+    <h2>LAN throughput</h2>
+    <div class="legend"><span><i class="sw" style="background:var(--rx)"></i>in <b id="lanrx">–</b></span>
+      <span><i class="sw" style="background:var(--tx)"></i>out <b id="lantx">–</b></span></div>
+    <svg id="lansvg" viewBox="0 0 300 78" preserveAspectRatio="none"></svg>
+  </section>
+
+  <section>
+    <h2>Wireless (2.4 GHz)</h2>
+    <dl class="kv">
+      <dt>SSID</dt><dd id="wssid">–</dd>
+      <dt>State</dt><dd id="wup">–</dd>
+      <dt>Channel</dt><dd id="wchan">–</dd>
+      <dt>Clients</dt><dd id="wcl">–</dd>
+      <dt>PHY rate</dt><dd id="wrate">–</dd>
+      <dt>Noise floor</dt><dd id="wnoise">–</dd>
+      <dt>Radio temp</dt><dd id="wtemp">–</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Firewall drops</h2>
+    <dl class="kv">
+      <dt>INPUT total</dt><dd id="fwinp">–</dd>
+      <dt>INPUT rate</dt><dd id="fwind">–</dd>
+      <dt>FORWARD total</dt><dd id="fwfwp">–</dd>
+      <dt>FORWARD rate</dt><dd id="fwfwd">–</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Storage</h2>
+    <div id="disks"></div>
+  </section>
+
+  <section style="grid-column:1/-1">
+    <h2>DHCP leases <span id="leasen" class="meta"></span></h2>
+    <div class="wrap"><table id="leases">
+      <thead><tr><th class="mono">IP</th><th class="mono">MAC</th><th>Name</th><th>Expires</th></tr></thead>
+      <tbody></tbody></table></div>
+    <div class="empty" id="noleases" hidden>No active leases.</div>
+  </section>
+</main>
+
+<footer id="foot"></footer>
+
+<script>
+"use strict";
+var N = 90, wan = {rx:[], tx:[]}, lan = {rx:[], tx:[]}, lastT = 0;
+
+function rate(b){
+  if (!b) return "0 b/s";
+  var u = ["b/s","kb/s","Mb/s","Gb/s"], v = b * 8, i = 0;
+  while (v >= 1000 && i < u.length - 1) { v /= 1000; i++; }
+  return (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + " " + u[i];
+}
+function bytes(kb){
+  var u = ["KB","MB","GB","TB"], v = kb, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + " " + u[i];
+}
+function dur(s){
+  s = Math.floor(s);
+  var d = Math.floor(s/86400), h = Math.floor(s%86400/3600), m = Math.floor(s%3600/60);
+  return d ? d + "d " + h + "h" : h ? h + "h " + m + "m" : m + "m";
+}
+function push(a, v){ a.push(v); if (a.length > N) a.shift(); }
+
+// Both series share one scale, so "up" and "down" stay visually comparable.
+function draw(svg, a, b, ca, cb){
+  var max = 1;
+  for (var i = 0; i < a.length; i++) { if (a[i] > max) max = a[i]; }
+  for (i = 0; i < b.length; i++) { if (b[i] > max) max = b[i]; }
+  function path(arr){
+    if (!arr.length) return "";
+    var step = 300 / Math.max(N - 1, 1), d = "";
+    for (var i = 0; i < arr.length; i++){
+      var x = i * step, y = 76 - (arr[i] / max) * 72;
+      d += (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+    }
+    return d;
+  }
+  svg.innerHTML =
+    '<path d="' + path(a) + '" fill="none" stroke="' + ca + '" stroke-width="1.6"/>' +
+    '<path d="' + path(b) + '" fill="none" stroke="' + cb + '" stroke-width="1.6"/>';
+}
+
+function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function set(id, v){ var e = document.getElementById(id); if (e) e.textContent = v; }
+
+function render(d){
+  set("model", d.host.model);
+  set("hostmeta", d.host.name + " · " + d.host.fw + " · " + d.host.lan + "/" + d.host.mask);
+  set("clock", new Date(d.t * 1000).toLocaleTimeString());
+  set("uptime", dur(d.up));
+
+  set("cpu", d.cpu.pct.toFixed(0) + "%");
+  document.getElementById("cpubar").style.width = Math.min(d.cpu.pct, 100) + "%";
+  set("ctemp", d.cpu.temp ? d.cpu.temp + " °C" : "n/a");
+  set("load", d.cpu.load.join("  "));
+  set("ctxt", d.cpu.ctxt + "/s");
+  set("intr", d.cpu.intr + "/s");
+
+  var used = d.mem.total - d.mem.free - d.mem.buffers - d.mem.cached;
+  var pct = d.mem.total ? (used / d.mem.total) * 100 : 0;
+  set("memv", pct.toFixed(0) + "%");
+  document.getElementById("membar").style.width = Math.min(pct, 100) + "%";
+  set("ctn", d.ct.n + (d.ct.max ? " / " + d.ct.max : ""));
+
+  push(wan.rx, d.net.wan.rx); push(wan.tx, d.net.wan.tx);
+  push(lan.rx, d.net.lan.rx); push(lan.tx, d.net.lan.tx);
+  set("wanrx", rate(d.net.wan.rx)); set("wantx", rate(d.net.wan.tx));
+  set("lanrx", rate(d.net.lan.rx)); set("lantx", rate(d.net.lan.tx));
+  draw(document.getElementById("wansvg"), wan.rx, wan.tx, css("--rx"), css("--tx"));
+  draw(document.getElementById("lansvg"), lan.rx, lan.tx, css("--rx"), css("--tx"));
+
+  set("wssid", d.wifi.ssid || "–");
+  set("wup", d.wifi.up ? "up" : "down");
+  document.getElementById("wup").style.color = d.wifi.up ? css("--ok") : css("--dim");
+  set("wchan", d.wifi.chan || "–");
+  set("wcl", d.wifi.clients);
+  set("wrate", d.wifi.rate ? d.wifi.rate + " Mbps" : "–");
+  set("wnoise", d.wifi.noise ? d.wifi.noise + " dBm" : "–");
+  set("wtemp", d.wifi.temp ? d.wifi.temp + " °C" : "–");
+
+  set("fwinp", d.fw.inp); set("fwind", d.fw.ind + "/s");
+  set("fwfwp", d.fw.fwp); set("fwfwd", d.fw.fwd + "/s");
+
+  var dv = document.getElementById("disks"), h = "";
+  (d.disks || []).forEach(function(x){
+    var p = x.kb ? (x.u / x.kb) * 100 : 0;
+    h += '<div style="margin-bottom:9px"><div style="display:flex;justify-content:space-between;font-size:12.5px">' +
+         '<span>' + x.m + '</span><span style="color:var(--dim)">' + bytes(x.u) + " / " + bytes(x.kb) +
+         '</span></div><div class="bar"><i style="width:' + p.toFixed(1) + '%"></i></div></div>';
+  });
+  dv.innerHTML = h || '<div class="empty">No mounted volumes.</div>';
+
+  var tb = document.querySelector("#leases tbody"), L = d.dhcp.leases || [];
+  tb.innerHTML = L.map(function(l){
+    var exp = l.e ? new Date(l.e * 1000).toLocaleString() : "static";
+    return "<tr><td class='mono'>" + l.i + "</td><td class='mono'>" + l.m +
+           "</td><td>" + (l.n || "–") + "</td><td>" + exp + "</td></tr>";
+  }).join("");
+  document.getElementById("leases").hidden = !L.length;
+  document.getElementById("noleases").hidden = !!L.length;
+  set("leasen", L.length ? "(" + L.length + ")" : "");
+
+  set("foot", "collector sample " + new Date(d.t * 1000).toLocaleString() +
+              " · /opt " + (d.opt ? "mounted" : "not mounted"));
+}
+
+// Staleness is judged on the SAMPLE timestamp, not on whether the fetch
+// succeeded. A wedged collector keeps serving a valid but frozen file, which
+// looks perfectly healthy unless you check the clock inside it.
+function checkStale(){
+  var age = Date.now() / 1000 - lastT;
+  document.getElementById("stale").className = (lastT && age > 15) ? "on" : "";
+}
+
+function poll(){
+  var x = new XMLHttpRequest();
+  x.open("GET", "status.json?_=" + Date.now(), true);
+  x.timeout = 8000;
+  x.onload = function(){
+    if (x.status !== 200) return;
+    try { var d = JSON.parse(x.responseText); } catch (e) { return; }
+    lastT = d.t; render(d); checkStale();
+  };
+  x.send();
+}
+setInterval(poll, 2000);
+setInterval(checkStale, 2000);
+poll();
+</script>
+</body>
+</html>

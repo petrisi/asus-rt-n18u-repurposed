@@ -59,10 +59,28 @@ for f in usbmount.sh services.sh killsvc.sh; do
     say "installed /jffs/$f"
 done
 
+if [ -d portal ]; then
+    mkdir -p /jffs/portal/www
+    for f in portal/*.sh; do
+        [ -f "$f" ] || continue
+        cp "$f" "/jffs/portal/" && chmod 755 "/jffs/portal/$(basename "$f")"
+        say "installed /jffs/portal/$(basename "$f")"
+    done
+    if [ -f portal/www/index.html ]; then
+        cp portal/www/index.html /jffs/portal/www/
+        say "installed /jffs/portal/www/index.html"
+    fi
+    [ -s /jffs/portal/.htdigest ] || \
+        warn "dashboard will run UNAUTHENTICATED on the LAN.
+           Create /jffs/portal/.htdigest (realm rtn18u) to require a login -
+           see docs/05-dashboard.md."
+fi
+
 echo
 echo "=== 4. syntax-checking everything installed ==="
 _bad=0
-for f in /jffs/usbmount.sh /jffs/services.sh /jffs/killsvc.sh; do
+for f in /jffs/usbmount.sh /jffs/services.sh /jffs/killsvc.sh /jffs/portal/*.sh; do
+    [ -f "$f" ] || continue
     if sh -n "$f" 2>/dev/null; then say "OK   $f"; else say "FAIL $f"; _bad=1; fi
 done
 [ "$_bad" -eq 0 ] || fail "syntax errors above - nvram not touched"
@@ -94,6 +112,8 @@ say ""
 say "Reboot, then check:"
 say "    cat /jffs/services.log      # /opt bind mount and sshd startup"
 say "    cat /jffs/killsvc.log       # per-process final state"
+say "    cat /tmp/portal/portal.log  # dashboard startup"
+say "    http://$(nvram get lan_ipaddr 2>/dev/null):8080/   # the dashboard"
 say "    pidof eapd nas              # both MUST still be running"
 say ""
 say "Do not disable telnet until an SSH key login has survived a reboot."

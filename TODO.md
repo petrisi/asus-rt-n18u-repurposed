@@ -23,10 +23,9 @@ already working, for no gain while the box is on a bench.
 
 ## Not yet built
 
-Ported from the sibling GT-AC5300 project, in rough dependency order:
+Ported from the sibling GT-AC5300 project, in rough dependency order.
+The status dashboard is **done** — see `docs/05-dashboard.md`. Remaining:
 
-- **Status dashboard.** Needs a port choice — ASUS `httpd` owns port 80 on the
-  LAN address, so 8080 or similar.
 - **Long-term metric history (rrdtool).** Available in Entware for this target.
   Note the clock: this router has no RTC, so the date is wrong until NTP syncs
   over the WAN. rrdtool rejects updates older than the last one, so a
@@ -35,6 +34,12 @@ Ported from the sibling GT-AC5300 project, in rough dependency order:
 - **BitTorrent seedbox.** Possible, but this box has 256 MB of RAM against the
   GT-AC5300's 1 GB. Expect to tune Transmission's cache and peer limits down
   hard, and measure before trusting it.
+
+## Also worth doing
+
+- **Enable dashboard authentication.** It currently runs unauthenticated on the
+  LAN; `portal_start.sh` logs a NOTE saying so at every start. Create
+  `/jffs/portal/.htdigest` with realm `rtn18u` to turn it on.
 
 ## Open questions
 

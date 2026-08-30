@@ -105,7 +105,12 @@ zeroes that look like idle links. Do the maths in `awk`, which uses doubles.
 
 This is a thinner busybox than the GT-AC5300's. Absent, among others:
 
-    id      od
+    id      od      timeout
+
+`timeout` in particular has no replacement, and bounding a call that can hang
+is not optional here — see the `wl_to()` helper in
+`scripts/portal/portal_collector.sh` for the backgrounded-poll pattern used
+instead.
 
 Check before relying on anything outside the obvious core.
 

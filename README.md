@@ -26,6 +26,8 @@ short version is in [99-gotchas.md](docs/99-gotchas.md).
   respawns ([03-disable-telemetry.md](docs/03-disable-telemetry.md))
 - Entware, so you have a real package manager
   ([04-usb-and-entware.md](docs/04-usb-and-entware.md))
+- A dependency-free status dashboard, using the firmware's own lighttpd
+  ([05-dashboard.md](docs/05-dashboard.md))
 
 ## Start here
 
@@ -36,6 +38,7 @@ short version is in [99-gotchas.md](docs/99-gotchas.md).
 | [02-persistence.md](docs/02-persistence.md) | **making anything survive a reboot** |
 | [03-disable-telemetry.md](docs/03-disable-telemetry.md) | **stopping the call-home services for good** |
 | [04-usb-and-entware.md](docs/04-usb-and-entware.md) | storage and a package manager |
+| [05-dashboard.md](docs/05-dashboard.md) | the status portal |
 | [99-gotchas.md](docs/99-gotchas.md) | **the platform traps — read this before debugging anything** |
 
 Set your values in [CONFIG.md](CONFIG.md) first. Deferred work is tracked in
