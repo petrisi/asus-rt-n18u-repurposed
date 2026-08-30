@@ -31,6 +31,10 @@ CFG=/opt/etc/transmission
 LOG=/jffs/transmission.log
 LOCKDIR=/tmp/transmission.lock.d
 PEER_PORT=51413
+# Same reasoning as services.sh: poll fast until the daemon is up (this stage
+# waits on /opt, which another stage provides at an unpredictable time), then
+# back off to a cheap heartbeat.
+INTERVAL_FAST=10
 INTERVAL=60
 STARTWAIT=40
 
@@ -101,5 +105,5 @@ while :; do
         running || start_daemon
         ensure_fw
     fi
-    sleep "$INTERVAL"
+    if running; then sleep "$INTERVAL"; else sleep "$INTERVAL_FAST"; fi
 done

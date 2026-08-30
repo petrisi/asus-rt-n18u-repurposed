@@ -35,6 +35,13 @@ USB_LABEL=ROUTERDATA
 DATA_LABEL=BTDATA
 LOG=/jffs/services.log
 LOCKDIR=/tmp/services.lock.d
+# Poll fast until everything is up, then back off. The dependencies this stage
+# waits for (the volume mount, /opt) appear at unpredictable times during boot,
+# and at a flat 60s a single missed pass delayed SSH to ~130s uptime. Fast
+# polling is cheap here specifically because blkid produces NO syslog noise on
+# this model -- verified, 0 matches in 3286 lines. Do not copy that assumption
+# to other hardware; on the GT-AC5300 blkid floods the log with ubi errors.
+INTERVAL_FAST=10
 INTERVAL=60
 
 # The hook fires on every USB mount event. One maintenance loop is enough.
@@ -168,10 +175,14 @@ while :; do
         fi
     fi
 
-    if [ "$first" -eq 1 ]; then
-        pidof sshd >/dev/null 2>&1 && log "initial setup complete, uptime $(cut -d' ' -f1 /proc/uptime)"
-        first=0
+    # Converged = /opt bound and sshd actually running.
+    if grep -q " /tmp/opt " /proc/mounts 2>/dev/null && pidof sshd >/dev/null 2>&1; then
+        if [ "$first" -eq 1 ]; then
+            log "initial setup complete, uptime $(cut -d' ' -f1 /proc/uptime)"
+            first=0
+        fi
+        sleep "$INTERVAL"
+    else
+        sleep "$INTERVAL_FAST"
     fi
-
-    sleep "$INTERVAL"
 done

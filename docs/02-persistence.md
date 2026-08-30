@@ -90,6 +90,23 @@ Every stage is `[ -x ]` guarded, so the disable path for any of it is `rm`:
 Build every stage you add the same way. The recovery path should be `rm`, not
 "boot into recovery mode".
 
+## Stages start concurrently — wait, do not assert
+
+The hook launches every stage at once, with no ordering. `transmission.sh`
+needs `/opt`, which `services.sh` binds about 20 seconds later. A dependency
+check *before* the loop therefore loses the race and the stage exits
+permanently. Put such checks **inside** the loop.
+
+The same applies to state the firmware destroys at runtime (`/etc/passwd`, bind
+mounts): repair it every pass rather than setting it up once. Three separate
+outages here had that single root cause.
+
+Poll fast until converged, then back off — `services.sh` uses 10s until `/opt`
+is bound and sshd is running, then 60s. On this model a flat 60s delayed SSH to
+~130s of uptime; the adaptive version reaches it in ~55s. Fast polling is only
+cheap because `blkid` produces no syslog noise here, which is **not** true of
+every Asuswrt device.
+
 ## The failure mode is the USB stick
 
 With no stick inserted, the hook never fires and none of this starts. The
