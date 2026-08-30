@@ -44,8 +44,11 @@ write_conf() {
     echo "server.errorlog      = \"$RUN/lighttpd.error.log\""
     echo "index-file.names     = ( \"index.html\" )"
     echo "mimetype.assign      = ( \".html\" => \"text/html; charset=utf-8\", \".json\" => \"application/json\", \".css\" => \"text/css\", \".js\" => \"application/javascript\" )"
-    # The live data lives in tmpfs, outside the document root.
-    echo "alias.url            = ( \"/status.json\" => \"$JSON\" )"
+    # The live data and the exported history live in tmpfs, outside the
+    # document root. The history files are absent whenever the USB stick or
+    # rrdtool is missing -- the page treats a 404 as "no history", which is
+    # correct, so no conditional is needed here.
+    echo "alias.url            = ( \"/status.json\" => \"$JSON\", \"/hist_24h.json\" => \"$RUN/hist_24h.json\", \"/hist_7d.json\" => \"$RUN/hist_7d.json\", \"/hist_30d.json\" => \"$RUN/hist_30d.json\" )"
     # Never serve dotfiles -- the digest file lives outside www/ anyway, but
     # this closes the class of mistake rather than the instance.
     echo "url.access-deny      = ( \"~\", \".inc\", \".htdigest\" )"
@@ -69,6 +72,42 @@ ensure_fw() {
     iptables -I INPUT -i "$WANIF" -p tcp --dport "$PORT" -j DROP 2>/dev/null
     ip6tables -D INPUT -i "$WANIF" -p tcp --dport "$PORT" -j DROP 2>/dev/null
     ip6tables -I INPUT -i "$WANIF" -p tcp --dport "$PORT" -j DROP 2>/dev/null
+}
+
+# Run a job at most every $2 seconds, never overlapping itself.
+#
+# The stamp file paces it; the lock directory guarantees a slow run is not
+# launched twice. Both are needed: pacing alone breaks down as soon as a run
+# takes longer than its interval, which the 30d export can. Jobs run in the
+# background so a slow export never stalls the supervision loop -- lighttpd
+# and collector recovery must stay responsive.
+run_gated() {
+    _n=$1; _int=$2; shift 2
+    _stamp="$RUN/.stamp.$_n"; _lock="$RUN/.lock.$_n"
+    _now=$(date +%s); _last=0
+    [ -f "$_stamp" ] && _last=$(cat "$_stamp" 2>/dev/null)
+    [ -z "$_last" ] && _last=0
+    [ $(( _now - _last )) -ge "$_int" ] || return 0
+    mkdir "$_lock" 2>/dev/null || return 0     # previous run still in flight
+    echo "$_now" > "$_stamp"
+    ( "$@" >/dev/null 2>&1; rmdir "$_lock" 2>/dev/null ) &
+}
+
+# The optional history layer. Every one of these scripts is a silent no-op
+# when the USB stick or rrdtool is absent, so this needs no guard of its own
+# and the live dashboard is unaffected either way.
+#
+# Intervals are 55s rather than 60s because the supervision loop polls every
+# $POLL (30s): at 60 the gate would alternate between 60s and 90s cadence,
+# and 90s against a 120s heartbeat leaves very little margin.
+ensure_rrd() {
+    run_gated feeder   55 "$PORTAL/rrd_feeder.sh"
+    run_gated ping     55 "$PORTAL/rrd_ping.sh"
+    # Staggered: a full export is ~12s of solid awk on one core. The coarse
+    # windows barely change between runs, so they run rarely.
+    run_gated exp24h  300 "$PORTAL/rrd_export.sh" 24h
+    run_gated exp7d   900 "$PORTAL/rrd_export.sh" 7d
+    run_gated exp30d 3600 "$PORTAL/rrd_export.sh" 30d
 }
 
 collector_running() { pidof portal_collector.sh >/dev/null 2>&1; }
@@ -113,6 +152,7 @@ log "=== portal start, uptime $(cut -d' ' -f1 /proc/uptime) ==="
 start_lighttpd
 start_collector
 ensure_fw
+ensure_rrd
 
 # ---- supervision loop ----
 #
@@ -149,5 +189,6 @@ while :; do
         fi
     fi
 
+    ensure_rrd
     ensure_fw
 done

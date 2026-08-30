@@ -24,16 +24,35 @@ already working, for no gain while the box is on a bench.
 ## Not yet built
 
 Ported from the sibling GT-AC5300 project, in rough dependency order.
-The status dashboard is **done** — see `docs/05-dashboard.md`. Remaining:
+The status dashboard (`docs/05-dashboard.md`) and the rrdtool history layer
+(`docs/07-rrd-history.md`) are **done**. Remaining:
 
-- **Long-term metric history (rrdtool).** Available in Entware for this target.
-  Note the clock: this router has no RTC, so the date is wrong until NTP syncs
-  over the WAN. rrdtool rejects updates older than the last one, so a
-  2018-to-now jump mid-run will corrupt a database. Do not start collecting
-  before NTP has settled.
-- **BitTorrent seedbox.** Possible, but this box has 256 MB of RAM against the
-  GT-AC5300's 1 GB. Expect to tune Transmission's cache and peer limits down
-  hard, and measure before trusting it.
+- **BitTorrent seedbox — decided against.** Not on performance grounds; the
+  box measures better than expected:
+
+  | | measured on this unit |
+  |---|---|
+  | CPU idle | 86% (the ~1.0 load average is I/O wait, not CPU) |
+  | hash throughput | ~21 MB/s (md5 proxy — no `sha1sum` in this busybox) |
+  | RAM free | ~200 MB |
+  | USB write | 9.1 MB/s / 73 Mbps |
+
+  That would run a modest seedbox. The objection is architectural and specific
+  to this model: **the USB stick is the boot hook.** `script_usbmount` is the
+  only hook available, so the same stick carries the ignition for SSH, the
+  telemetry sweep, the dashboard, the RRD databases and the sshd host keys.
+  Sustained torrent writes there mean flash wear on the one device everything
+  depends on, I/O contention on the path that is already the bottleneck, and a
+  filesystem corruption that takes down remote access rather than just
+  downloads.
+
+  On the GT-AC5300 the stick is only storage and the same mistake costs you
+  Entware alone. Here it costs the whole stack.
+
+  If it is ever wanted: use a **separate disk on the front USB 3.0 port** and
+  leave the boot stick untouched. That removes every objection except the
+  9.1 MB/s figure, which is a property of this particular stick on a USB 2.0
+  port rather than of the platform.
 
 ## Also worth doing
 

@@ -50,6 +50,18 @@ svg{display:block;width:100%;height:78px}
 .kv dd{margin:0;font-variant-numeric:tabular-nums;text-align:right}
 .empty{color:var(--dim);font-size:12.5px;padding:6px 0}
 footer{padding:10px 18px 26px;color:var(--dim);font-size:12px;text-align:center}
+.hhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.tabs{display:flex;gap:4px;margin-left:auto}
+.tabs button{font:inherit;font-size:12px;padding:3px 11px;border:1px solid var(--line);
+  background:transparent;color:var(--dim);border-radius:99px;cursor:pointer}
+.tabs button.sel{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.hgrid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.chart .ct{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}
+.chart .ct .nm{color:var(--ink);font-weight:600}
+.chart .ct .rg{color:var(--dim);font-variant-numeric:tabular-nums}
+.chart svg{height:96px}
+.ax{display:flex;justify-content:space-between;color:var(--dim);font-size:11px;margin-top:2px}
+#hnote{color:var(--dim);font-size:12.5px;padding:8px 0}
 </style>
 </head>
 <body>
@@ -128,6 +140,19 @@ footer{padding:10px 18px 26px;color:var(--dim);font-size:12px;text-align:center}
       <thead><tr><th class="mono">IP</th><th class="mono">MAC</th><th>Name</th><th>Expires</th></tr></thead>
       <tbody></tbody></table></div>
     <div class="empty" id="noleases" hidden>No active leases.</div>
+  </section>
+  <section style="grid-column:1/-1">
+    <div class="hhead">
+      <h2 style="margin:0">History</h2>
+      <span class="meta" id="hmeta"></span>
+      <div class="tabs" id="htabs">
+        <button data-w="24h" class="sel">24 h</button>
+        <button data-w="7d">7 d</button>
+        <button data-w="30d">30 d</button>
+      </div>
+    </div>
+    <div id="hnote" hidden></div>
+    <div class="hgrid" id="hgrid"></div>
   </section>
 </main>
 
@@ -260,6 +285,113 @@ function poll(){
 setInterval(poll, 2000);
 setInterval(checkStale, 2000);
 poll();
+
+// ---------------------------------------------------------------- history
+var HWIN = "24h", HTIMER = null;
+
+// Each entry: title, the series keys to draw, a value formatter, and colours.
+var CHARTS = [
+  {t:"CPU",            k:["cpu"],              c:["--accent"], f:function(v){return v.toFixed(0)+"%";}},
+  {t:"Temperature",    k:["temp","rtemp"],     c:["--tx","--warn"], f:function(v){return v.toFixed(0)+" °C";}},
+  {t:"WAN throughput", k:["wanrx","wantx"],    c:["--rx","--tx"], f:fmtRate},
+  {t:"LAN throughput", k:["lanrx","lantx"],    c:["--rx","--tx"], f:fmtRate},
+  {t:"Memory used",    k:["memused"],          c:["--accent"], f:function(v){return (v/1024).toFixed(0)+" MB";}},
+  {t:"Connections",    k:["conn"],             c:["--accent"], f:function(v){return v.toFixed(0);}},
+  {t:"Latency",        k:["rtt"],              c:["--ok"],     f:function(v){return v.toFixed(1)+" ms";}},
+  {t:"Wi-Fi clients",  k:["clients"],          c:["--accent"], f:function(v){return v.toFixed(0);}},
+  {t:"Noise floor",    k:["noise"],            c:["--warn"],   f:function(v){return v.toFixed(0)+" dBm";}},
+  {t:"Firewall drops", k:["indrop","fwdrop"],  c:["--bad","--warn"], f:function(v){return v.toFixed(2)+"/s";}}
+];
+
+function fmtRate(v){ return rate(v); }
+
+// Nulls BREAK the line. rrdtool records a gap as UNKNOWN precisely so that a
+// missing sample is distinguishable from an idle router; interpolating across
+// it would throw that away.
+function histPath(arr, min, max, w, h){
+  var d = "", pen = false, span = (max - min) || 1;
+  var step = w / Math.max(arr.length - 1, 1);
+  for (var i = 0; i < arr.length; i++){
+    var v = arr[i];
+    if (v === null || v === undefined || isNaN(v)) { pen = false; continue; }
+    var x = i * step, y = h - ((v - min) / span) * (h - 4) - 2;
+    d += (pen ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+    pen = true;
+  }
+  return d;
+}
+
+function renderHistory(d){
+  var grid = document.getElementById("hgrid"), out = "";
+  var t0 = new Date(d.start * 1000), t1 = new Date(d.end * 1000);
+  document.getElementById("hmeta").textContent =
+    t0.toLocaleString() + "  →  " + t1.toLocaleString() + "  ·  " + d.step + "s step";
+
+  CHARTS.forEach(function(c){
+    var series = c.k.map(function(k){ return d.series[k] || []; });
+    var min = Infinity, max = -Infinity, any = false;
+    series.forEach(function(a){
+      a.forEach(function(v){
+        if (v === null || v === undefined || isNaN(v)) return;
+        any = true;
+        if (v < min) min = v; if (v > max) max = v;
+      });
+    });
+    var body;
+    if (!any){
+      body = '<div style="height:96px;display:flex;align-items:center;justify-content:center;' +
+             'color:var(--dim);font-size:12px">no data yet</div>';
+    } else {
+      if (min === max) { min -= 1; max += 1; }
+      var paths = series.map(function(a, i){
+        return '<path d="' + histPath(a, min, max, 300, 96) + '" fill="none" stroke="' +
+               css(c.c[i] || c.c[0]) + '" stroke-width="1.5"/>';
+      }).join("");
+      body = '<svg viewBox="0 0 300 96" preserveAspectRatio="none">' + paths + '</svg>';
+    }
+    out += '<div class="chart"><div class="ct"><span class="nm">' + c.t + '</span>' +
+           '<span class="rg">' + (any ? c.f(min) + " – " + c.f(max) : "–") + '</span></div>' +
+           body + '</div>';
+  });
+  grid.innerHTML = out;
+}
+
+function loadHistory(){
+  var x = new XMLHttpRequest();
+  x.open("GET", "hist_" + HWIN + ".json?_=" + Date.now(), true);
+  x.timeout = 20000;
+  var note = document.getElementById("hnote");
+  x.onload = function(){
+    if (x.status !== 200){
+      // 404 is the normal state with no USB stick or no rrdtool. Absent data
+      // must look absent, not stale.
+      note.hidden = false;
+      note.textContent = "No history for this window. The RRD layer needs the USB stick and rrdtool; see docs/07-rrd-history.md.";
+      document.getElementById("hgrid").innerHTML = "";
+      return;
+    }
+    try { var d = JSON.parse(x.responseText); } catch (e) { return; }
+    note.hidden = true;
+    renderHistory(d);
+  };
+  x.onerror = x.ontimeout = function(){
+    note.hidden = false;
+    note.textContent = "History request failed.";
+  };
+  x.send();
+}
+
+document.getElementById("htabs").addEventListener("click", function(e){
+  var b = e.target.closest("button"); if (!b) return;
+  HWIN = b.getAttribute("data-w");
+  Array.prototype.forEach.call(this.querySelectorAll("button"), function(x){
+    x.className = (x === b) ? "sel" : "";
+  });
+  loadHistory();
+});
+
+loadHistory();
+setInterval(loadHistory, 300000);
 </script>
 </body>
 </html>

@@ -74,6 +74,13 @@ if [ -d portal ]; then
         warn "dashboard will run UNAUTHENTICATED on the LAN.
            Create /jffs/portal/.htdigest (realm rtn18u) to require a login -
            see docs/05-dashboard.md."
+    # The history layer is optional: its scripts are silent no-ops without it.
+    if [ -x /opt/bin/rrdtool ]; then
+        say "rrdtool: present (history layer active)"
+    else
+        say "rrdtool: absent - history layer will no-op silently."
+        say "         opkg install rrdtool  to enable it (docs/07-rrd-history.md)"
+    fi
 fi
 
 echo

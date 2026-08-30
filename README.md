@@ -28,6 +28,8 @@ short version is in [99-gotchas.md](docs/99-gotchas.md).
   ([04-usb-and-entware.md](docs/04-usb-and-entware.md))
 - A dependency-free status dashboard, using the firmware's own lighttpd
   ([05-dashboard.md](docs/05-dashboard.md))
+- Optional long-term history via rrdtool — a year in 1.1 MB that never grows
+  ([07-rrd-history.md](docs/07-rrd-history.md))
 
 ## Start here
 
@@ -39,6 +41,7 @@ short version is in [99-gotchas.md](docs/99-gotchas.md).
 | [03-disable-telemetry.md](docs/03-disable-telemetry.md) | **stopping the call-home services for good** |
 | [04-usb-and-entware.md](docs/04-usb-and-entware.md) | storage and a package manager |
 | [05-dashboard.md](docs/05-dashboard.md) | the status portal |
+| [07-rrd-history.md](docs/07-rrd-history.md) | long-term history (optional) |
 | [99-gotchas.md](docs/99-gotchas.md) | **the platform traps — read this before debugging anything** |
 
 Set your values in [CONFIG.md](CONFIG.md) first. Deferred work is tracked in
