@@ -1,7 +1,16 @@
 # Migrating Entware from ROUTERDATA to BTDATA
 
-**Not yet done.** This is a prepared runbook, to be executed if the small
-`ROUTERDATA` stick keeps misbehaving.
+**Executed 2026-08-31.** Kept as the record of what was done, and as the
+rollback procedure. The trigger was the stick failing to enumerate after a
+physical move, then throwing `EXT3-fs error ... remounting filesystem
+read-only` on a later boot — two independent signals.
+
+Outcome: Entware and the RRDs now live on `BTDATA`; a cold boot brings the
+whole stack up from that one disk (`/opt` bound from `/dev/sda1`, sshd at 105s
+uptime, transmission following, dashboard and history serving). The old stick
+was unmounted, `e2fsck`'d clean and relabelled `ROUTERDATA-OLD`. Its `e2fsck`
+came back clean, so the corruption was contact-related rather than media
+failure — worth knowing before condemning a stick.
 
 ## Why
 
