@@ -51,8 +51,7 @@ short version is in [99-gotchas.md](docs/99-gotchas.md).
 | [07-rrd-history.md](docs/07-rrd-history.md) | long-term history (optional) |
 | [99-gotchas.md](docs/99-gotchas.md) | **the platform traps — read this before debugging anything** |
 
-Set your values in [CONFIG.md](CONFIG.md) first. Deferred work is tracked in
-[TODO.md](TODO.md).
+Set your values in [CONFIG.md](CONFIG.md) first.
 
 ## Read this before you start
 

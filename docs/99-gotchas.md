@@ -39,8 +39,26 @@ does nothing: `httpd` validates against the hashed `acc_list`, and telnet
 against `/etc/shadow`. Both are derived only when the change goes through the
 GUI form. Post it to `start_apply.htm` with `action_script=restart_httpd`
 instead, then verify against **both** the web API and telnet — they consult
-different stores, so testing one proves nothing about the other. See
-`TODO.md` for the full recipe.
+different stores, so testing one proves nothing about the other.
+
+| store | used by | set how |
+|---|---|---|
+| `acc_list` (hashed) | ASUS `httpd` / web GUI | derived by httpd |
+| `/etc/shadow` (MD5-crypt) | telnet, `login` | regenerated at boot |
+| `http_passwd` | staging value only | what you post |
+
+The change has to go through the GUI's own mechanism, which is what regenerates
+all three:
+
+    POST /start_apply.htm
+      action_mode=apply
+      action_script=restart_httpd
+      http_username=admin
+      http_passwd=<plaintext>
+      current_page=Advanced_System_Content.asp
+
+Verify by logging in with the new password *and* confirming the old one is
+refused, on both paths.
 
 ## nvram accepts settings for features the firmware does not have
 

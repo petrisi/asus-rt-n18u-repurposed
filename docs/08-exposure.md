@@ -152,8 +152,9 @@ run an SSID on it, consider client isolation:
 
     nvram get wl0_ap_isolate     # 0 = clients can reach each other
 
-The Wi-Fi passphrase matters more here than it did behind a second NAT — see
-`TODO.md`.
+The Wi-Fi passphrase matters more here than it did behind a second NAT: it is
+the boundary around a LAN that now has a public address on the other side of
+it.
 
 ## What to check periodically
 
