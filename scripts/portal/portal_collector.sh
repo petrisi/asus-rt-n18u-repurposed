@@ -31,6 +31,22 @@ LEASES=/var/lib/misc/dnsmasq.leases
 CT_COUNT=/proc/sys/net/netfilter/nf_conntrack_count
 CT_MAX=/proc/sys/net/netfilter/nf_conntrack_max
 
+# Transmission. OPTIONAL: everything below degrades to nulls when the daemon,
+# the binary or the credentials file is absent, so the dashboard keeps working
+# without the seedbox exactly as it does without the USB volume.
+#
+# The RPC stays AUTHENTICATED. transmission rewrites rpc-password in
+# settings.json as a salted hash on first run, so the plaintext cannot be read
+# back from there -- hence this root-only file (mode 600), same pattern as the
+# dashboard's .htdigest. Disabling RPC auth would have been the easier fix and
+# a worse one: the dashboard is exposed to the WAN on an unpatched lighttpd,
+# and an unauthenticated localhost RPC is a far better prize behind any
+# future request-forgery-shaped flaw.
+TR_BIN=/opt/bin/transmission-remote
+TR_CREDS=/jffs/portal/.trrpc
+TR_STATS=/opt/etc/transmission/stats.json
+TR_RPC=127.0.0.1:9091
+
 mkdir -p "$RUN"
 
 # Device identity -- read once, so the page carries no hardcoded assumptions.
@@ -83,6 +99,62 @@ json_escape() { sed 's/\\/\\\\/g; s/"/\\"/g' ; }
 # ---- slow-path samples (every SLOWMOD ticks) ----
 s_wtemp=0; s_wrate=""; s_wnoise=0; s_wchan=0; s_wup=0; s_clients=0
 s_leases="[]"; s_disks="[]"; s_opt=0
+b_on=0; b_n=0; b_dl=0; b_sd=0; b_st=0; b_down=0; b_up=0; b_peers=0; b_ub=0; b_db=0; b_pct=-1
+
+# Bounded run of an arbitrary command, same discipline as wl_to: a wedged
+# transmission-daemon must not freeze the whole collector.
+run_to() {
+    _lim=$1; shift
+    : > "$RUN/.rt"
+    ( unset LD_LIBRARY_PATH LD_PRELOAD; "$@" > "$RUN/.rt" 2>/dev/null ) &
+    _p=$!; _n=0
+    while kill -0 "$_p" 2>/dev/null; do
+        [ "$_n" -ge "$_lim" ] && { kill -9 "$_p" 2>/dev/null; break; }
+        usleep 100000; _n=$((_n + 1))
+    done
+    wait "$_p" 2>/dev/null
+    cat "$RUN/.rt" 2>/dev/null
+}
+
+bt_sample() {
+    b_on=0; b_n=0; b_dl=0; b_sd=0; b_st=0; b_down=0; b_up=0; b_peers=0; b_pct=-1
+    [ -x "$TR_BIN" ] || return 0
+    [ -s "$TR_CREDS" ] || return 0
+    pidof transmission-daemon >/dev/null 2>&1 || return 0
+    _auth=$(cat "$TR_CREDS" 2>/dev/null)
+    [ -n "$_auth" ] || return 0
+    b_on=1
+
+    # Torrent list -> counts by state and the Sum row's rates (kB/s).
+    # Parsed by keyword rather than column: names contain spaces and ETA can be
+    # one token ("Unknown") or two ("42 min"), so positions are not stable.
+    set -- $(run_to 50 "$TR_BIN" "$TR_RPC" -n "$_auth" -l 2>/dev/null | awk '
+        /^ *[0-9]+\*? +/ { n++
+            # "Up & Down" means both at once on an INCOMPLETE torrent, so it
+            # counts as downloading -- classifying it as seeding reported a
+            # 67%-complete torrent as "seeding", which is simply false.
+            if ($0 ~ /Downloading|Up & Down/) dl++
+            else if ($0 ~ /Seeding/) sd++
+            else if ($0 ~ /Stopped|Finished/) st++
+            if (match($2, /^[0-9]+/)) { p = substr($2, RSTART, RLENGTH) + 0; if (p > pct) pct = p }
+        }
+        /^Sum:/ { up = $(NF-1) + 0; dn = $NF + 0 }
+        END { printf "%d %d %d %d %.1f %.1f %d", n+0, dl+0, sd+0, st+0, dn+0, up+0, (pct=="" ? -1 : pct) }')
+    b_n=${1:-0}; b_dl=${2:-0}; b_sd=${3:-0}; b_st=${4:-0}
+    b_down=${5:-0}; b_up=${6:-0}; b_pct=${7:--1}
+
+    # Peers across active torrents, one call.
+    b_peers=$(run_to 50 "$TR_BIN" "$TR_RPC" -n "$_auth" -t active -i 2>/dev/null | awk '
+        /connected to/ { for (i = 1; i <= NF; i++) if ($i == "to") { s += $(i+1) + 0; break } }
+        END { printf "%d", s+0 }')
+    [ -z "$b_peers" ] && b_peers=0
+
+    # Lifetime totals: exact byte counters, no RPC and no unit parsing.
+    if [ -s "$TR_STATS" ]; then
+        set -- $(awk -F'[:,]' '/uploaded-bytes/{u=$2+0} /downloaded-bytes/{d=$2+0} END{printf "%.0f %.0f", u, d}' "$TR_STATS")
+        b_ub=${1:-0}; b_db=${2:-0}
+    fi
+}
 
 slow_sample() {
     s_wchan=$(wl_to "$WLIF" channel | awk '/current mac channel/{print $NF+0; exit}')
@@ -127,6 +199,8 @@ slow_sample() {
         END{printf "]"}')
 
     grep -q " /tmp/opt " /proc/mounts 2>/dev/null && s_opt=1 || s_opt=0
+
+    bt_sample
 }
 
 # ---- first snapshot, so the first emitted sample already has real rates ----
@@ -201,7 +275,9 @@ while :; do
     printf '"fw":{"inp":%s,"fwp":%s,"ind":%s,"fwd":%s},' "$f_inp" "$f_fwp" "$f_ind" "$f_fwd"
     printf '"dhcp":{"on":%s,"start":"%s","end":"%s","lease":%s,"leases":%s},' \
            "$d_on" "$d_st" "$d_en" "$d_ls" "$s_leases"
-    printf '"disks":%s,"opt":%s' "$s_disks" "$s_opt"
+    printf '"disks":%s,"opt":%s,' "$s_disks" "$s_opt"
+    printf '"bt":{"on":%s,"n":%s,"dl":%s,"sd":%s,"st":%s,"down":%s,"up":%s,"peers":%s,"ub":%s,"db":%s,"pct":%s}' \
+           "$b_on" "$b_n" "$b_dl" "$b_sd" "$b_st" "$b_down" "$b_up" "$b_peers" "$b_ub" "$b_db" "$b_pct"
     printf '}\n'
     } > "$TMP" 2>/dev/null
 

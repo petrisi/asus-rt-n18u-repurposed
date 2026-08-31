@@ -159,6 +159,38 @@ Note also that the automounter is unreliable in timing: on one boot it had not
 mounted a freshly formatted ext4 volume even after three minutes, and on the
 next it got there first. Do not depend on either outcome.
 
+## An in-place `sed` on the router is undone by your next deploy
+
+The single-disk migration changed `USB_LABEL=ROUTERDATA` to `BTDATA` by
+`sed`-ing the files **on the router**. The working copies those files were
+deployed from still said `ROUTERDATA`, so the next unrelated deploy silently
+reverted the label — and the RRD feeder and exporter began resolving a volume
+that no longer exists. The feeder exited 0 (correct behaviour for a missing
+volume) and the exporter ran `cleanup_exports`, **deleting the history JSON**.
+
+Nothing errored. The dashboard just said "no history" again.
+
+If you edit in place on the device, make the same edit in the source you deploy
+from, or stop deploying that file. `grep -H '^USB_LABEL=' ` across both sides
+takes a second and would have caught it immediately.
+
+## Resolve mountpoints from /proc/mounts, not blkid
+
+`blkid` opens every block device it can find. On a box whose USB bus is
+saturated — a torrent writing at 1 MB/s, say — that is a real cost, and a probe
+that returns nothing is indistinguishable from "the volume is gone" to a script
+that treats it as authoritative. In this project that path *deletes* exported
+history.
+
+`/proc/mounts` is a kernel file, needs no device access, and cannot fail that
+way:
+
+    awk -v l="$LABEL" '$2 ~ ("^/tmp/mnt/" l "(\\([0-9]+\\))?$") {print $2; exit}' /proc/mounts
+
+The optional `(N)` also handles the automounter suffix below. `blkid` is still
+the right tool when you need the *device node* of a volume that is not mounted
+yet — that is the one case `/proc/mounts` cannot answer.
+
 ## The automounter sometimes uses /tmp/mnt/<LABEL>(1) even with nothing at the plain name
 
 Separate from the duplicate-mount entry below, and more insidious. After one

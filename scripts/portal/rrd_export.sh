@@ -23,7 +23,7 @@
 #    argument test.
 
 RUN=/tmp/portal
-USB_LABEL=ROUTERDATA
+USB_LABEL=BTDATA
 # Resolve the volume's ACTUAL mountpoint rather than assuming /tmp/mnt/<LABEL>.
 #
 # The firmware's automounter sometimes lands the volume on "/tmp/mnt/<LABEL>(1)"
@@ -32,10 +32,20 @@ USB_LABEL=ROUTERDATA
 # exits silently: no feeding, no export, and the dashboard reports "no history"
 # while the databases sit intact a few characters away. services.sh has always
 # resolved dynamically, which is why SSH and Entware kept working through it.
+# Resolve the mountpoint from /proc/mounts alone -- NO blkid.
+#
+# blkid opens every block device it can find, and under sustained torrent I/O
+# it intermittently returns nothing. These scripts read that as "the volume is
+# gone": the feeder exits silently and the exporter runs cleanup_exports, which
+# DELETES the history JSON. A transient probe failure must never be mistaken
+# for absent hardware.
+#
+# /proc/mounts is a kernel file with no device access, so it cannot fail that
+# way. It also handles the automounter's "(1)" suffix, which is why the match
+# is anchored with an optional index.
 find_mp() {
-    _dev=$(blkid 2>/dev/null | grep "LABEL=\"$USB_LABEL\"" | cut -d: -f1)
-    [ -n "$_dev" ] || return 1
-    awk -v d="$_dev" '$1==d {print $2; exit}' /proc/mounts
+    awk -v l="$USB_LABEL" \
+        '$2 ~ ("^/tmp/mnt/" l "(\\([0-9]+\\))?$") { print $2; exit }' /proc/mounts
 }
 USB_MP=$(find_mp)
 RRD_DIR="$USB_MP/rrd"
@@ -61,7 +71,7 @@ if [ -n "$1" ]; then
 else
     WINDOWS="$ALL_WINDOWS"
 fi
-RRDS="sys net wifi fw ping"
+RRDS="sys net wifi fw ping bt"
 
 # If the source is gone, remove the exports. Stale JSON left in tmpfs renders
 # as though it were current; absent data must look absent.

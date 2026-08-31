@@ -5,14 +5,19 @@ here, and grep for them before you run anything.
 
 | value | default | where |
 |---|---|---|
-| USB volume label (boot) | `ROUTERDATA` | `USB_LABEL` in `scripts/services.sh` |
-| Data volume label | `BTDATA` | `DATA_LABEL` in `scripts/services.sh`, `scripts/transmission.sh` |
+| Volume label | `BTDATA` | `USB_LABEL`/`DATA_LABEL` in `scripts/services.sh`, `USB_LABEL` in `rrd_feeder.sh` and `rrd_export.sh`, `DATA_LABEL` in `scripts/transmission.sh` |
+| Transmission RPC creds | `/jffs/portal/.trrpc` (mode 600) | read by `portal_collector.sh` |
 | BitTorrent peer port | `51413` | `PEER_PORT` in `scripts/transmission.sh` |
 | SSH listen address | `192.168.1.1` | `ListenAddress` in `/opt/etc/ssh/sshd_config` |
 | Authorized keys path | `/jffs/.ssh/authorized_keys` | `AuthorizedKeysFile` in `sshd_config` |
 | Service log | `/jffs/services.log` | `LOG` in `scripts/services.sh` |
 | Kill-sweep log | `/jffs/killsvc.log` | `LOG` in `scripts/killsvc.sh` |
 | Run-once locks | `/tmp/services.lock`, `/tmp/killsvc.lock` | `LOCK`, both scripts |
+
+One label now, not two: this deployment consolidated onto a single disk (see
+`docs/09-single-disk-migration.md`), so every script resolves the same volume.
+If you run two volumes, `USB_LABEL` (the one carrying `/opt` and the RRDs) and
+`DATA_LABEL` (bulk storage) can differ.
 
 ## Why the USB volume is found by label, not device node
 

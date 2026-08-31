@@ -28,7 +28,7 @@
 
 RUN=/tmp/portal
 STATUS="$RUN/status.json"
-USB_LABEL=ROUTERDATA
+USB_LABEL=BTDATA
 # Resolve the volume's ACTUAL mountpoint rather than assuming /tmp/mnt/<LABEL>.
 #
 # The firmware's automounter sometimes lands the volume on "/tmp/mnt/<LABEL>(1)"
@@ -37,10 +37,20 @@ USB_LABEL=ROUTERDATA
 # exits silently: no feeding, no export, and the dashboard reports "no history"
 # while the databases sit intact a few characters away. services.sh has always
 # resolved dynamically, which is why SSH and Entware kept working through it.
+# Resolve the mountpoint from /proc/mounts alone -- NO blkid.
+#
+# blkid opens every block device it can find, and under sustained torrent I/O
+# it intermittently returns nothing. These scripts read that as "the volume is
+# gone": the feeder exits silently and the exporter runs cleanup_exports, which
+# DELETES the history JSON. A transient probe failure must never be mistaken
+# for absent hardware.
+#
+# /proc/mounts is a kernel file with no device access, so it cannot fail that
+# way. It also handles the automounter's "(1)" suffix, which is why the match
+# is anchored with an optional index.
 find_mp() {
-    _dev=$(blkid 2>/dev/null | grep "LABEL=\"$USB_LABEL\"" | cut -d: -f1)
-    [ -n "$_dev" ] || return 1
-    awk -v d="$_dev" '$1==d {print $2; exit}' /proc/mounts
+    awk -v l="$USB_LABEL" \
+        '$2 ~ ("^/tmp/mnt/" l "(\\([0-9]+\\))?$") { print $2; exit }' /proc/mounts
 }
 USB_MP=$(find_mp)
 RRD_DIR="$USB_MP/rrd"
@@ -49,6 +59,7 @@ NET="$RRD_DIR/net.rrd"
 WIFI="$RRD_DIR/wifi.rrd"
 FW="$RRD_DIR/fw.rrd"
 PING="$RRD_DIR/ping.rrd"
+BT="$RRD_DIR/bt.rrd"
 PINGKV="$RUN/ping.kv"
 RRDTOOL=/opt/bin/rrdtool
 STEP=60
@@ -108,6 +119,14 @@ create_rrds() {
         DS:fwdrop:DERIVE:120:0:U \
         $RRA_SET 2>/dev/null
 
+    # Seedbox throughput. GAUGE in kB/s as transmission reports it -- these are
+    # rates already, not counters, so DERIVE would be wrong here.
+    [ -f "$BT" ] || $RRDTOOL create "$BT" --step $STEP \
+        DS:btdown:GAUGE:120:0:U \
+        DS:btup:GAUGE:120:0:U \
+        DS:btpeers:GAUGE:120:0:U \
+        $RRA_SET 2>/dev/null
+
     [ -f "$PING" ] || $RRDTOOL create "$PING" --step $STEP \
         DS:rtt:GAUGE:120:0:U \
         DS:loss:GAUGE:120:0:100 \
@@ -162,6 +181,12 @@ parse_status() {
 
         printf "P_CONN=%s\n", fld(obj("ct"), "n")
 
+        b = obj("bt")
+        if (fld(b, "on") == "1") {
+            printf "P_BTDOWN=%s\nP_BTUP=%s\nP_BTPEERS=%s\n",
+                   fld(b, "down"), fld(b, "up"), fld(b, "peers")
+        } else printf "P_BTDOWN=U\nP_BTUP=U\nP_BTPEERS=U\n"
+
         w = obj("wifi")
         printf "P_WTEMP=%s\n",   fld(w, "temp")
         printf "P_WNOISE=%s\n",  fld(w, "noise")
@@ -172,6 +197,7 @@ parse_status() {
 
 P_CPU=U; P_TEMP=U; P_LOAD1=U; P_MEMU=U; P_CONN=U
 P_WTEMP=U; P_WNOISE=U; P_WCLI=U; P_WRATE=U
+P_BTDOWN=U; P_BTUP=U; P_BTPEERS=U
 if [ "$fresh" -eq 1 ]; then
     eval "$(parse_status)"
 fi
@@ -214,5 +240,6 @@ $RRDTOOL update "$NET"  "N:$N_WR:$N_WT:$N_LR:$N_LT"                 2>/dev/null
 $RRDTOOL update "$WIFI" "N:$P_WTEMP:$P_WNOISE:$P_WCLI:$P_WRATE"     2>/dev/null
 $RRDTOOL update "$FW"   "N:$F_IN:$F_FW"                             2>/dev/null
 $RRDTOOL update "$PING" "N:$P_RTT:$P_LOSS"                          2>/dev/null
+$RRDTOOL update "$BT"   "N:$P_BTDOWN:$P_BTUP:$P_BTPEERS"            2>/dev/null
 
 exit 0

@@ -150,6 +150,24 @@ footer{padding:10px 18px 26px;color:var(--dim);font-size:12px;text-align:center}
     </dl>
   </section>
 
+  <section id="btsec">
+    <h2>BitTorrent</h2>
+    <div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(84px,1fr))">
+      <div class="tile"><div class="v" id="btdown">–</div><div class="l">Download</div></div>
+      <div class="tile"><div class="v" id="btup">–</div><div class="l">Upload</div></div>
+      <div class="tile"><div class="v" id="btpeers">–</div><div class="l">Peers</div></div>
+    </div>
+    <div class="bar" style="margin-top:10px"><i id="btbar" style="width:0"></i></div>
+    <dl class="kv" style="margin-top:9px">
+      <dt>State</dt><dd id="btstate">–</dd>
+      <dt>Torrents</dt><dd id="btn">–</dd>
+      <dt>Progress</dt><dd id="btpct">–</dd>
+      <dt>Downloaded (lifetime)</dt><dd id="btdb">–</dd>
+      <dt>Uploaded (lifetime)</dt><dd id="btub">–</dd>
+      <dt>Share ratio</dt><dd id="btratio">–</dd>
+    </dl>
+  </section>
+
   <section>
     <h2>Storage</h2>
     <div id="disks"></div>
@@ -261,6 +279,32 @@ function render(d){
   set("fwinp", d.fw.inp); set("fwind", d.fw.ind + "/s");
   set("fwfwp", d.fw.fwp); set("fwfwd", d.fw.fwd + "/s");
 
+  var bt = d.bt || {on:0};
+  var btsec = document.getElementById("btsec");
+  if (!bt.on){
+    set("btstate", "not running");
+    document.getElementById("btstate").style.color = css("--dim");
+    ["btdown","btup","btpeers","btn","btpct","btdb","btub","btratio"].forEach(function(i){ set(i, "–"); });
+    document.getElementById("btbar").style.width = "0";
+  } else {
+    // rate() takes bytes/s; transmission reports kB/s.
+    set("btdown", rate(bt.down * 1000));
+    set("btup", rate(bt.up * 1000));
+    set("btpeers", bt.peers);
+    set("btstate", "running");
+    document.getElementById("btstate").style.color = css("--ok");
+    var parts = [];
+    if (bt.dl) parts.push(bt.dl + " downloading");
+    if (bt.sd) parts.push(bt.sd + " seeding");
+    if (bt.st) parts.push(bt.st + " stopped");
+    set("btn", bt.n + (parts.length ? " (" + parts.join(", ") + ")" : ""));
+    set("btpct", bt.pct >= 0 ? bt.pct + "%" : "–");
+    document.getElementById("btbar").style.width = (bt.pct >= 0 ? Math.min(bt.pct, 100) : 0) + "%";
+    set("btdb", bytes(bt.db / 1024));
+    set("btub", bytes(bt.ub / 1024));
+    set("btratio", bt.db > 0 ? (bt.ub / bt.db).toFixed(3) : "–");
+  }
+
   var dv = document.getElementById("disks"), h = "";
   (d.disks || []).forEach(function(x){
     var p = x.kb ? (x.u / x.kb) * 100 : 0;
@@ -336,6 +380,7 @@ function fmtMB(v){ return (v/1024).toFixed(0) + " MB"; }
 function fmtDbm(v){ return v.toFixed(0) + " dBm"; }
 function fmtMbps(v){ return v.toFixed(0) + " Mbps"; }
 function fmtPs(v){ return v.toFixed(2) + "/s"; }
+function fmtKB(v){ return rate(v * 1000); }   // transmission reports kB/s
 
 // Two series per chart at most, so slots 1-2 of the validated categorical
 // palette are all that is ever needed. Colour follows the series, never its
@@ -353,7 +398,9 @@ var CHARTS = [
   {t:"Wi-Fi clients",  s:[["clients","Associated"]],            f:fmtInt,  z0:true},
   {t:"Noise floor",    s:[["noise","Noise"]],                   f:fmtDbm},
   {t:"Wi-Fi PHY rate", s:[["rate","PHY"]],                      f:fmtMbps, z0:true},
-  {t:"Firewall drops", s:[["indrop","INPUT"],["fwdrop","FORWARD"]], f:fmtPs, z0:true}
+  {t:"Firewall drops", s:[["indrop","INPUT"],["fwdrop","FORWARD"]], f:fmtPs, z0:true},
+  {t:"BitTorrent",     s:[["btdown","Download"],["btup","Upload"]], f:fmtKB,  z0:true},
+  {t:"BitTorrent peers", s:[["btpeers","Peers"]],                   f:fmtInt, z0:true}
 ];
 
 var M = {l:56, r:14, t:10, b:24}, PLOT_H = 152;

@@ -27,7 +27,7 @@
 # The single-instance lock is a CONCURRENCY guard, not a run-once guard: the
 # hook fires on every USB mount event and must not stack up loops.
 
-USB_LABEL=ROUTERDATA
+USB_LABEL=BTDATA
 # Optional second volume for bulk data (BitTorrent payloads). The firmware's
 # automounter does NOT pick this up -- verified across a reboot: blkid sees
 # LABEL="BTDATA" but nothing mounts it -- so we mount it ourselves. Absent

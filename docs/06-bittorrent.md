@@ -140,6 +140,41 @@ copy. See [99-gotchas.md](99-gotchas.md).
 Defaults are 200 global and 50 per torrent, which is a lot of sockets and
 conntrack entries for this box. Raise them only if you measure headroom.
 
+## Surfacing it on the dashboard
+
+`portal_collector.sh` samples Transmission on its 30s slow path and emits a
+`bt` block in `status.json`: running state, torrent counts by state, current
+rates, peer count, progress, and lifetime byte totals. The history layer adds
+`bt.rrd` (download, upload, peers) and two charts.
+
+Three decisions worth keeping:
+
+**The RPC stays authenticated.** Transmission rewrites `rpc-password` in
+`settings.json` as a salted hash on first run, so a script cannot read the
+plaintext back — which makes "just disable RPC auth" the tempting fix. Store
+the plaintext in a root-only file instead (`/jffs/portal/.trrpc`, mode 600,
+same pattern as `.htdigest`). The dashboard is exposed to the WAN on an
+unpatched lighttpd; an unauthenticated localhost RPC would be a much better
+prize behind any future request-forgery-shaped flaw.
+
+**Bound the RPC call.** A wedged `transmission-daemon` must not freeze the
+collector, so the call runs under the same backgrounded-poll ceiling as the
+`wl` ioctls (`run_to`, 5s then SIGKILL). Verified afterwards that
+`status.json` still advances on its 2s cadence.
+
+**Lifetime totals come from `stats.json`, not the RPC.** That file carries
+exact byte counters (`uploaded-bytes`, `downloaded-bytes`), so there is no
+human-formatted "12.29 MB" to parse back into a number.
+
+**Rates are GAUGE, not DERIVE.** Transmission reports kB/s — already a rate.
+DERIVE would differentiate it a second time and render nonsense.
+
+One parsing note: torrent state is matched by keyword, not column position,
+because names contain spaces and ETA is sometimes one token ("Unknown") and
+sometimes two ("42 min"). `Up & Down` counts as **downloading** — it means both
+at once on an incomplete torrent, and classifying it as seeding reported a
+67%-complete torrent as "seeding".
+
 ## Accounting
 
 Lifetime totals live in `/opt/etc/transmission/stats.json`, readable without
