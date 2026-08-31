@@ -8,11 +8,17 @@
 :root{
   --bg:#f6f7f9; --panel:#fff; --ink:#16191d; --dim:#6b7280; --line:#e3e6ea;
   --accent:#2563eb; --rx:#2563eb; --tx:#7c3aed; --ok:#15803d; --warn:#b45309; --bad:#b91c1c;
+  /* validated categorical slots 1-2 (light) - see dataviz palette */
+  --series-1:#2a78d6; --series-2:#eb6834;
+  --grid:#e6e9ed; --axis-ink:#6b7280;
 }
 @media (prefers-color-scheme:dark){
   :root{
     --bg:#101317; --panel:#171b21; --ink:#e6e9ee; --dim:#9aa3af; --line:#262c35;
     --accent:#60a5fa; --rx:#60a5fa; --tx:#a78bfa; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171;
+    /* dark steps of the same two hues, validated against the dark surface */
+    --series-1:#3987e5; --series-2:#d95926;
+    --grid:#2a313b; --axis-ink:#9aa3af;
   }
 }
 *{box-sizing:border-box}
@@ -55,11 +61,26 @@ footer{padding:10px 18px 26px;color:var(--dim);font-size:12px;text-align:center}
 .tabs button{font:inherit;font-size:12px;padding:3px 11px;border:1px solid var(--line);
   background:transparent;color:var(--dim);border-radius:99px;cursor:pointer}
 .tabs button.sel{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-.hgrid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
-.chart .ct{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}
-.chart .ct .nm{color:var(--ink);font-weight:600}
-.chart .ct .rg{color:var(--dim);font-variant-numeric:tabular-nums}
-.chart svg{height:96px}
+.hgrid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(430px,1fr))}
+.chart{border:1px solid var(--line);border-radius:9px;padding:11px 12px 9px;background:var(--panel)}
+.chart .ct{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:2px}
+.chart .ct .nm{color:var(--ink);font-weight:650;font-size:13px}
+.chart .lg{display:flex;gap:12px;font-size:11.5px;color:var(--dim)}
+.chart .lg i{display:inline-block;width:13px;height:2px;border-radius:1px;margin-right:5px;vertical-align:3px}
+.chart .sm{display:flex;gap:14px;font-size:11.5px;color:var(--dim);
+  font-variant-numeric:tabular-nums;margin:0 0 5px}
+.chart .sm b{color:var(--ink);font-weight:600}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart .empty2{height:186px;display:flex;align-items:center;justify-content:center;
+  color:var(--dim);font-size:12px;border:1px solid var(--line);border-radius:6px}
+#htip{position:fixed;z-index:50;pointer-events:none;display:none;background:var(--panel);
+  border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:12px;
+  box-shadow:0 4px 14px rgba(0,0,0,.18);min-width:132px}
+#htip .tt{color:var(--dim);font-size:11px;margin-bottom:4px}
+#htip .tr{display:flex;align-items:baseline;gap:7px;line-height:1.5}
+#htip .tr i{display:inline-block;width:11px;height:2px;border-radius:1px;flex:none}
+#htip .tr b{color:var(--ink);font-weight:650;font-variant-numeric:tabular-nums}
+#htip .tr span{color:var(--dim)}
 .ax{display:flex;justify-content:space-between;color:var(--dim);font-size:11px;margin-top:2px}
 #hnote{color:var(--dim);font-size:12.5px;padding:8px 0}
 </style>
@@ -287,86 +308,220 @@ setInterval(checkStale, 2000);
 poll();
 
 // ---------------------------------------------------------------- history
-var HWIN = "24h", HTIMER = null;
-
-// Each entry: title, the series keys to draw, a value formatter, and colours.
-var CHARTS = [
-  {t:"CPU",            k:["cpu"],              c:["--accent"], f:function(v){return v.toFixed(0)+"%";}},
-  {t:"Temperature",    k:["temp","rtemp"],     c:["--tx","--warn"], f:function(v){return v.toFixed(0)+" °C";}},
-  {t:"WAN throughput", k:["wanrx","wantx"],    c:["--rx","--tx"], f:fmtRate},
-  {t:"LAN throughput", k:["lanrx","lantx"],    c:["--rx","--tx"], f:fmtRate},
-  {t:"Memory used",    k:["memused"],          c:["--accent"], f:function(v){return (v/1024).toFixed(0)+" MB";}},
-  {t:"Connections",    k:["conn"],             c:["--accent"], f:function(v){return v.toFixed(0);}},
-  {t:"Latency",        k:["rtt"],              c:["--ok"],     f:function(v){return v.toFixed(1)+" ms";}},
-  {t:"Wi-Fi clients",  k:["clients"],          c:["--accent"], f:function(v){return v.toFixed(0);}},
-  {t:"Noise floor",    k:["noise"],            c:["--warn"],   f:function(v){return v.toFixed(0)+" dBm";}},
-  {t:"Firewall drops", k:["indrop","fwdrop"],  c:["--bad","--warn"], f:function(v){return v.toFixed(2)+"/s";}}
-];
+var HWIN = "24h", HDATA = null;
 
 function fmtRate(v){ return rate(v); }
+function fmtInt(v){ return Math.round(v).toLocaleString(); }
+function fmtPct(v){ return v.toFixed(v < 10 ? 1 : 0) + "%"; }
+function fmtC(v){ return v.toFixed(0) + " °C"; }
+function fmtMs(v){ return v.toFixed(1) + " ms"; }
+function fmtMB(v){ return (v/1024).toFixed(0) + " MB"; }
+function fmtDbm(v){ return v.toFixed(0) + " dBm"; }
+function fmtMbps(v){ return v.toFixed(0) + " Mbps"; }
+function fmtPs(v){ return v.toFixed(2) + "/s"; }
 
-// Nulls BREAK the line. rrdtool records a gap as UNKNOWN precisely so that a
-// missing sample is distinguishable from an idle router; interpolating across
-// it would throw that away.
-function histPath(arr, min, max, w, h){
-  var d = "", pen = false, span = (max - min) || 1;
-  var step = w / Math.max(arr.length - 1, 1);
-  for (var i = 0; i < arr.length; i++){
-    var v = arr[i];
-    if (v === null || v === undefined || isNaN(v)) { pen = false; continue; }
-    var x = i * step, y = h - ((v - min) / span) * (h - 4) - 2;
-    d += (pen ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
-    pen = true;
+// Two series per chart at most, so slots 1-2 of the validated categorical
+// palette are all that is ever needed. Colour follows the series, never its
+// rank, and text never wears the series colour - the line-key beside a label
+// carries identity instead.
+var CHARTS = [
+  {t:"CPU load",       s:[["cpu","CPU"]],                       f:fmtPct,  z:[0,100]},
+  {t:"Temperature",    s:[["temp","CPU"],["rtemp","Radio"]],    f:fmtC},
+  {t:"WAN throughput", s:[["wanrx","Down"],["wantx","Up"]],     f:fmtRate, z0:true},
+  {t:"LAN throughput", s:[["lanrx","In"],["lantx","Out"]],      f:fmtRate, z0:true},
+  {t:"Memory used",    s:[["memused","Used"]],                  f:fmtMB,   z0:true},
+  {t:"Connections",    s:[["conn","Tracked"]],                  f:fmtInt,  z0:true},
+  {t:"Latency",        s:[["rtt","Round trip"]],                f:fmtMs,   z0:true},
+  {t:"Packet loss",    s:[["loss","Loss"]],                     f:fmtPct,  z:[0,100]},
+  {t:"Wi-Fi clients",  s:[["clients","Associated"]],            f:fmtInt,  z0:true},
+  {t:"Noise floor",    s:[["noise","Noise"]],                   f:fmtDbm},
+  {t:"Wi-Fi PHY rate", s:[["rate","PHY"]],                      f:fmtMbps, z0:true},
+  {t:"Firewall drops", s:[["indrop","INPUT"],["fwdrop","FORWARD"]], f:fmtPs, z0:true}
+];
+
+var M = {l:56, r:14, t:10, b:24}, PLOT_H = 152;
+
+// Round tick steps to 1/2/2.5/5/10 x 10^n so the axis reads in clean numbers.
+function niceStep(range, target){
+  if (!(range > 0)) return 1;
+  var raw = range / target,
+      mag = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10)),
+      n = raw / mag,
+      st = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
+  return st * mag;
+}
+function axisTicks(lo, hi){
+  var step = niceStep(hi - lo, 4), out = [], v = Math.ceil(lo / step) * step;
+  for (; v <= hi + step * 0.001 && out.length < 9; v += step) out.push(v);
+  return out.length ? out : [lo, hi];
+}
+function esc(t){ var n = document.createTextNode(t); var d = document.createElement("div"); d.appendChild(n); return d.innerHTML; }
+
+function buildChart(card, spec, d){
+  var svg = card.querySelector("svg");
+  var W = Math.max(card.clientWidth - 24, 260);
+  var H = PLOT_H + M.t + M.b;                       // container includes the axis band
+  var pw = W - M.l - M.r, ph = PLOT_H;
+
+  var series = spec.s.map(function(p, i){
+    return {key:p[0], name:p[1], v:(d.series[p[0]] || []), c:css(i ? "--series-2" : "--series-1")};
+  });
+
+  var lo = Infinity, hi = -Infinity, any = false;
+  series.forEach(function(s){ s.v.forEach(function(x){
+    if (x === null || x === undefined || isNaN(x)) return;
+    any = true; if (x < lo) lo = x; if (x > hi) hi = x;
+  }); });
+
+  if (!any){
+    svg.outerHTML = '<div class="empty2">no data for this window yet</div>';
+    card.querySelector(".sm").textContent = "";
+    return;
   }
-  return d;
+  if (spec.z) { lo = spec.z[0]; hi = spec.z[1]; }
+  else {
+    if (spec.z0) lo = Math.min(lo, 0);
+    if (lo === hi) { lo -= 1; hi += 1; }
+    var pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  }
+
+  var ticks = axisTicks(lo, hi);
+  var n = series[0].v.length || 1;
+  var X = function(i){ return M.l + (n <= 1 ? 0 : i * pw / (n - 1)); };
+  var Y = function(v){ return M.t + ph - ((v - lo) / (hi - lo)) * ph; };
+
+  var g = [];
+  // Frame + gridlines: solid hairlines one step off the surface, never dashed.
+  g.push('<rect x="' + M.l + '" y="' + M.t + '" width="' + pw + '" height="' + ph +
+         '" fill="none" stroke="' + css("--grid") + '" stroke-width="1"/>');
+  ticks.forEach(function(tv){
+    var y = Y(tv); if (y < M.t - 0.5 || y > M.t + ph + 0.5) return;
+    g.push('<line x1="' + M.l + '" y1="' + y.toFixed(1) + '" x2="' + (M.l + pw) +
+           '" y2="' + y.toFixed(1) + '" stroke="' + css("--grid") + '" stroke-width="1"/>');
+    g.push('<text x="' + (M.l - 7) + '" y="' + (y + 3.5).toFixed(1) + '" text-anchor="end" ' +
+           'font-size="10.5" fill="' + css("--axis-ink") + '">' + esc(spec.f(tv)) + '</text>');
+  });
+  // X axis: 4 time labels across the window.
+  var xt = 4;
+  for (var k = 0; k <= xt; k++){
+    var idx = Math.round(k * (n - 1) / xt), x = X(idx),
+        ts = new Date((d.start + idx * d.step) * 1000),
+        lab = d.step >= 1800
+            ? (ts.getDate() + "/" + (ts.getMonth() + 1))
+            : (ts.getHours() + ":" + String(ts.getMinutes()).padStart(2, "0"));
+    if (k > 0 && k < xt)
+      g.push('<line x1="' + x.toFixed(1) + '" y1="' + M.t + '" x2="' + x.toFixed(1) +
+             '" y2="' + (M.t + ph) + '" stroke="' + css("--grid") + '" stroke-width="1"/>');
+    g.push('<text x="' + x.toFixed(1) + '" y="' + (M.t + ph + 15) + '" text-anchor="' +
+           (k === 0 ? "start" : k === xt ? "end" : "middle") + '" font-size="10.5" fill="' +
+           css("--axis-ink") + '">' + esc(lab) + '</text>');
+  }
+  // Data: 2px lines, gaps left as gaps (an RRD UNKNOWN is not a zero).
+  series.forEach(function(s){
+    var dd = "", pen = false, lastI = -1;
+    for (var i = 0; i < s.v.length; i++){
+      var v = s.v[i];
+      if (v === null || v === undefined || isNaN(v)) { pen = false; continue; }
+      dd += (pen ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1);
+      pen = true; lastI = i;
+    }
+    g.push('<path d="' + dd + '" fill="none" stroke="' + s.c +
+           '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>');
+    if (lastI >= 0){
+      s.last = s.v[lastI];
+      // End marker with a 2px surface ring so it stays legible over the line.
+      g.push('<circle cx="' + X(lastI).toFixed(1) + '" cy="' + Y(s.v[lastI]).toFixed(1) +
+             '" r="4" fill="' + s.c + '" stroke="' + css("--panel") + '" stroke-width="2"/>');
+    }
+  });
+  g.push('<rect class="hit" x="' + M.l + '" y="' + M.t + '" width="' + pw + '" height="' + ph + '" fill="transparent"/>');
+  g.push('<line class="xh" x1="0" y1="' + M.t + '" x2="0" y2="' + (M.t + ph) +
+         '" stroke="' + css("--axis-ink") + '" stroke-width="1" opacity="0"/>');
+
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  svg.innerHTML = g.join("");
+
+  // Values reachable without hovering: current value per series, axis carries the rest.
+  var sm = card.querySelector(".sm");
+  sm.innerHTML = series.map(function(s){
+    return '<span>' + esc(s.name) + ' now <b>' +
+           esc(s.last === undefined ? "n/a" : spec.f(s.last)) + '</b></span>';
+  }).join("");
+
+  card._hit = {svg:svg, series:series, n:n, X:X, spec:spec, d:d};
+}
+
+var tip = null;
+function ensureTip(){
+  if (!tip){ tip = document.createElement("div"); tip.id = "htip"; document.body.appendChild(tip); }
+  return tip;
+}
+function onMove(ev){
+  var card = ev.currentTarget, h = card._hit; if (!h) return;
+  var svg = h.svg, r = svg.getBoundingClientRect();
+  var px = ev.clientX - r.left;
+  if (px < M.l || px > r.width - M.r){ onLeave(ev); return; }
+  var i = Math.round((px - M.l) * (h.n - 1) / (r.width - M.l - M.r));
+  i = Math.max(0, Math.min(h.n - 1, i));
+  var xh = svg.querySelector(".xh");
+  if (xh){ xh.setAttribute("x1", h.X(i)); xh.setAttribute("x2", h.X(i)); xh.setAttribute("opacity", "0.5"); }
+  var t = ensureTip();
+  var when = new Date((h.d.start + i * h.d.step) * 1000);
+  var rows = h.series.map(function(s){
+    var v = s.v[i];
+    return '<div class="tr"><i style="background:' + s.c + '"></i><b>' +
+           esc(v === null || v === undefined || isNaN(v) ? "no data" : h.spec.f(v)) +
+           '</b><span>' + esc(s.name) + '</span></div>';
+  }).join("");
+  t.innerHTML = '<div class="tt">' + esc(when.toLocaleString()) + '</div>' + rows;
+  t.style.display = "block";
+  var tw = t.offsetWidth, th = t.offsetHeight;
+  var x = ev.clientX + 14, y = ev.clientY - th - 12;
+  if (x + tw > window.innerWidth - 8) x = ev.clientX - tw - 14;
+  if (y < 8) y = ev.clientY + 16;
+  t.style.left = x + "px"; t.style.top = y + "px";
+}
+function onLeave(ev){
+  var card = ev.currentTarget, h = card._hit;
+  if (h){ var xh = h.svg.querySelector(".xh"); if (xh) xh.setAttribute("opacity", "0"); }
+  if (tip) tip.style.display = "none";
 }
 
 function renderHistory(d){
-  var grid = document.getElementById("hgrid"), out = "";
+  HDATA = d;
+  var grid = document.getElementById("hgrid");
   var t0 = new Date(d.start * 1000), t1 = new Date(d.end * 1000);
   document.getElementById("hmeta").textContent =
     t0.toLocaleString() + "  →  " + t1.toLocaleString() + "  ·  " + d.step + "s step";
 
-  CHARTS.forEach(function(c){
-    var series = c.k.map(function(k){ return d.series[k] || []; });
-    var min = Infinity, max = -Infinity, any = false;
-    series.forEach(function(a){
-      a.forEach(function(v){
-        if (v === null || v === undefined || isNaN(v)) return;
-        any = true;
-        if (v < min) min = v; if (v > max) max = v;
-      });
-    });
-    var body;
-    if (!any){
-      body = '<div style="height:96px;display:flex;align-items:center;justify-content:center;' +
-             'color:var(--dim);font-size:12px">no data yet</div>';
-    } else {
-      if (min === max) { min -= 1; max += 1; }
-      var paths = series.map(function(a, i){
-        return '<path d="' + histPath(a, min, max, 300, 96) + '" fill="none" stroke="' +
-               css(c.c[i] || c.c[0]) + '" stroke-width="1.5"/>';
-      }).join("");
-      body = '<svg viewBox="0 0 300 96" preserveAspectRatio="none">' + paths + '</svg>';
-    }
-    out += '<div class="chart"><div class="ct"><span class="nm">' + c.t + '</span>' +
-           '<span class="rg">' + (any ? c.f(min) + " – " + c.f(max) : "–") + '</span></div>' +
-           body + '</div>';
+  grid.innerHTML = CHARTS.map(function(c){
+    // Legend for two or more series; a single series needs none - the title names it.
+    var lg = c.s.length < 2 ? "" : '<div class="lg">' + c.s.map(function(p, i){
+      return '<span><i style="background:var(--series-' + (i + 1) + ')"></i>' + esc(p[1]) + '</span>';
+    }).join("") + '</div>';
+    return '<div class="chart"><div class="ct"><span class="nm">' + esc(c.t) + '</span>' + lg +
+           '</div><div class="sm"></div><svg></svg></div>';
+  }).join("");
+
+  var cards = grid.querySelectorAll(".chart");
+  CHARTS.forEach(function(c, i){
+    var card = cards[i];
+    buildChart(card, c, d);
+    card.addEventListener("mousemove", onMove);
+    card.addEventListener("mouseleave", onLeave);
   });
-  grid.innerHTML = out;
 }
 
 function loadHistory(){
   var x = new XMLHttpRequest();
   x.open("GET", "hist_" + HWIN + ".json?_=" + Date.now(), true);
-  x.timeout = 20000;
+  x.timeout = 25000;
   var note = document.getElementById("hnote");
   x.onload = function(){
     if (x.status !== 200){
-      // 404 is the normal state with no USB stick or no rrdtool. Absent data
-      // must look absent, not stale.
       note.hidden = false;
-      note.textContent = "No history for this window. The RRD layer needs the USB stick and rrdtool; see docs/07-rrd-history.md.";
+      note.textContent = "No history for this window. The RRD layer needs the data volume and rrdtool; see docs/07-rrd-history.md.";
       document.getElementById("hgrid").innerHTML = "";
       return;
     }
@@ -375,8 +530,7 @@ function loadHistory(){
     renderHistory(d);
   };
   x.onerror = x.ontimeout = function(){
-    note.hidden = false;
-    note.textContent = "History request failed.";
+    note.hidden = false; note.textContent = "History request failed.";
   };
   x.send();
 }
@@ -390,8 +544,15 @@ document.getElementById("htabs").addEventListener("click", function(e){
   loadHistory();
 });
 
+var rzT = null;
+window.addEventListener("resize", function(){
+  clearTimeout(rzT);
+  rzT = setTimeout(function(){ if (HDATA) renderHistory(HDATA); }, 200);
+});
+
 loadHistory();
 setInterval(loadHistory, 300000);
+
 </script>
 </body>
 </html>

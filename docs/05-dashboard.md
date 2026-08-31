@@ -175,6 +175,47 @@ the single instance — verified:
     $ curl -o /dev/null -w '%{http_code}' http://192.168.1.1:8080/.htdigest
     403
 
+## The history charts
+
+Twelve small multiples on a two-column grid, each with a frame, a nice-numbered
+y-axis, four time labels, a legend where there are two series, and a
+crosshair + tooltip.
+
+Decisions worth keeping if you extend them:
+
+**Two colours, fixed by series, validated.** At most two series share a plot, so
+only categorical slots 1-2 are ever needed: `#2a78d6`/`#eb6834` on light,
+`#3987e5`/`#d95926` on dark. Both pairs were run through a colour-vision
+validator rather than eyeballed — worst-case CVD ΔE 24.7 light / 26.8 dark
+against a ≥8 target. Colour follows the series, never its position.
+
+**Never two y-scales on one plot.** CPU temperature and radio temperature share
+a chart because they share a unit; CPU load and temperature do not. A dual axis
+invents a correlation the data does not contain.
+
+**Text never wears the series colour.** Axis labels, legends and tooltip names
+use ink tokens; identity comes from the coloured line-key beside the text. The
+light palette's lighter hues are illegible as text on the surface.
+
+**Solid hairline grid, one step off the surface.** Never dashed — dashing reads
+as "projection" or "threshold" when it is only a grid.
+
+**Gaps stay gaps.** A null breaks the line rather than interpolating. An RRD
+UNKNOWN means "no sample", and drawing through it would render an outage as a
+flat, healthy-looking segment.
+
+**The container includes the axis band.** Height is `plot + top + bottom`
+margin, so the x labels are inside the card rather than causing a nested
+scrollbar.
+
+**Values are reachable without hovering.** Each chart prints the current value
+per series beneath the title, and the axis carries the rest — the tooltip
+enhances, it never gates.
+
+The SVG is rendered at measured pixel width rather than scaled with
+`preserveAspectRatio`, so text stays crisp and proportions stay correct; a
+debounced `resize` handler re-renders from the cached payload.
+
 ## Two things worth keeping
 
 **Judge liveness by data freshness, not just process existence.** A hung
