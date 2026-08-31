@@ -310,6 +310,30 @@ busybox `ash` truncates with no error. Interface byte counters pass 2^31 within
 days of uptime, so anything doing shell arithmetic on them starts producing
 zeroes that look like idle links. Do the maths in `awk`, which uses doubles.
 
+## A counter incremented inside `$( )` never reaches the caller
+
+    run_to() { _seq=$((_seq + 1)); _tf="$RUN/.rt.$$.$_seq"; ... }
+    out=$(run_to ...)          # runs in a SUBSHELL
+
+The increment is real inside the subshell and gone afterwards, so every call
+built the *same* "unique" filename. Use `mktemp` when you need a distinct path
+from a function that is normally called in a command substitution.
+
+## Not every slow command has a ceiling worth picking
+
+`transmission-remote` against a busy daemon measured >10s repeatedly and 0.5s
+moments later. Any timeout is therefore both too short and too long, and the
+killed call returns nothing — which, if the caller treats empty as data, becomes
+"0 torrents" beside four running ones.
+
+Two rules fall out of that:
+
+- **Sample unbounded things detached**, writing a last-good result the consumer
+  reads later. `rrd_ping.sh` does this for ICMP and the Transmission probe does
+  it now.
+- **Carry a status flag with the data.** `ok` plus the age of the last good
+  sample lets the consumer say "unavailable" instead of inventing a zero.
+
 ## busybox awk reads `var (` as a function call
 
     arr = arr (arr == "" ? "" : ",") row      # "Call to undefined function"

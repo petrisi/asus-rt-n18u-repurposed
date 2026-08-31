@@ -159,10 +159,21 @@ same pattern as `.htdigest`). The dashboard is exposed to the WAN on an
 unpatched lighttpd; an unauthenticated localhost RPC would be a much better
 prize behind any future request-forgery-shaped flaw.
 
-**Bound the RPC call.** A wedged `transmission-daemon` must not freeze the
-collector, so the call runs under the same backgrounded-poll ceiling as the
-`wl` ioctls (`run_to`, 5s then SIGKILL). Verified afterwards that
-`status.json` still advances on its 2s cadence.
+**Sample it detached, not inline.** `transmission-remote` against a daemon
+that is hashing or serving several torrents is not reliably bounded: measured
+repeatedly at **over 10 seconds**, then 0.5s moments later. Any ceiling you pick
+is therefore sometimes wrong, and a killed call returns nothing.
+
+So the probe runs **detached and self-locking**, writing a last-good sample the
+collector reads on its next pass — the same pattern `rrd_ping.sh` uses for
+latency, for the same reason. The collector never waits on it; `status.json`
+was verified to still advance once per second afterwards.
+
+**Report "unavailable", never zero.** A failed probe used to produce
+`n=0, tor=[]`, which the dashboard rendered as *"0 torrents"* while four were
+running — a lie rather than a gap. The block now carries `ok` and `age`, and the
+page shows three distinct states: not running, running-but-stats-stale (with the
+age of the last good sample), and good data. Absent data must look absent.
 
 **Lifetime totals come from `stats.json`, not the RPC.** That file carries
 exact byte counters (`uploaded-bytes`, `downloaded-bytes`), so there is no

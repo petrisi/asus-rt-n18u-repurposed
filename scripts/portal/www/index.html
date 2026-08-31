@@ -294,7 +294,23 @@ function render(d){
 
   var bt = d.bt || {on:0};
   var btsec = document.getElementById("btsec");
-  if (!bt.on){
+  // Three distinct states, never conflated: not running, running but the last
+  // probe is stale/failed, and good data. A failed probe used to render as
+  // "0 torrents", which is a lie rather than a gap.
+  if (bt.on && !bt.ok){
+    set("btstate", "stats unavailable");
+    document.getElementById("btstate").style.color = css("--warn");
+    ["btdown","btup","btpeers","btn","btpct","btdb","btub","btratio"].forEach(function(i){ set(i, "–"); });
+    document.getElementById("btbar").style.width = "0";
+    if (bt.db) { set("btdb", bytes(bt.db / 1024)); set("btub", bytes(bt.ub / 1024)); }
+    var tb0 = document.querySelector("#tortab tbody"); if (tb0) tb0.textContent = "";
+    document.getElementById("tortab").hidden = true;
+    var n0 = document.getElementById("notor");
+    n0.hidden = false;
+    n0.textContent = "Transmission is running, but the last stats probe did not complete"
+                   + (bt.age >= 0 ? " (last good sample " + dur(bt.age) + " ago)." : ".");
+    set("torn", "");
+  } else if (!bt.on){
     set("btstate", "not running");
     document.getElementById("btstate").style.color = css("--dim");
     ["btdown","btup","btpeers","btn","btpct","btdb","btub","btratio"].forEach(function(i){ set(i, "–"); });

@@ -46,6 +46,9 @@ TR_BIN=/opt/bin/transmission-remote
 TR_CREDS=/jffs/portal/.trrpc
 TR_STATS=/opt/etc/transmission/stats.json
 TR_RPC=127.0.0.1:9091
+BT_OUT="$RUN/bt.kv"          # last good sample, written by the detached probe
+BT_LOCK="$RUN/.bt.lock.d"
+BT_MAXAGE=180                # older than this and we report "unavailable"
 
 mkdir -p "$RUN"
 
@@ -99,7 +102,7 @@ json_escape() { sed 's/\\/\\\\/g; s/"/\\"/g' ; }
 # ---- slow-path samples (every SLOWMOD ticks) ----
 s_wtemp=0; s_wrate=""; s_wnoise=0; s_wchan=0; s_wup=0; s_clients=0
 s_leases="[]"; s_disks="[]"; s_opt=0
-b_on=0; b_n=0; b_dl=0; b_sd=0; b_st=0; b_down=0; b_up=0; b_peers=0; b_ub=0; b_db=0; b_pct=-1
+b_on=0; b_ok=0; b_age=-1; b_n=0; b_dl=0; b_sd=0; b_st=0; b_down=0; b_up=0; b_peers=0; b_ub=0; b_db=0; b_pct=-1
 b_tor="[]"
 
 # Bounded run of an arbitrary command, same discipline as wl_to: a wedged
@@ -116,8 +119,10 @@ run_to() {
     # call's result arrived in the other's buffer. With exec, $! is the command
     # itself and the kill actually stops it; the unique path means a stray
     # writer can still only corrupt its own file.
-    _rtseq=$((_rtseq + 1))
-    _tf="$RUN/.rt.$$.$_rtseq"
+    # mktemp, not a counter: run_to is normally called inside $( ), which is a
+    # subshell, so an incremented variable never reaches the parent and every
+    # call reused the same filename.
+    _tf=$(mktemp "$RUN/.rt.XXXXXX" 2>/dev/null) || _tf="$RUN/.rt.$$"
     ( unset LD_LIBRARY_PATH LD_PRELOAD; exec "$@" > "$_tf" 2>/dev/null ) &
     _p=$!; _n=0
     while kill -0 "$_p" 2>/dev/null; do
@@ -129,24 +134,23 @@ run_to() {
     rm -f "$_tf" 2>/dev/null
 }
 
-bt_sample() {
-    b_on=0; b_n=0; b_dl=0; b_sd=0; b_st=0; b_down=0; b_up=0; b_peers=0; b_pct=-1
-    [ -x "$TR_BIN" ] || return 0
-    [ -s "$TR_CREDS" ] || return 0
-    pidof transmission-daemon >/dev/null 2>&1 || return 0
+# Transmission sampling runs DETACHED, exactly like rrd_ping.sh does for
+# latency, and for the same reason: the call is not reliably bounded.
+#
+# transmission-remote against a daemon that is hashing or serving several
+# torrents intermittently takes longer than any ceiling worth imposing --
+# measured at >10s repeatedly, then 0.5s moments later. Calling it inline made
+# the collector wait on it every cycle and, worse, a killed call produced the
+# same zeros as "no torrents", so the dashboard reported an empty seedbox while
+# four torrents were running.
+#
+# The probe writes a last-good sample; the collector reads it and reports how
+# fresh it is. Absent data must look absent, never like zero.
+bt_probe() {
+    mkdir "$BT_LOCK" 2>/dev/null || return 0     # one probe at a time
     _auth=$(cat "$TR_CREDS" 2>/dev/null)
-    [ -n "$_auth" ] || return 0
-    b_on=1
-
-    # ONE RPC call for everything. "-t all -i" returns key/value blocks that
-    # parse reliably, and both the per-torrent list and the aggregate are
-    # derived from it -- so the summary can never disagree with the rows, and
-    # there is no second call to time out. The earlier design also called "-l"
-    # for the aggregate; under I/O load that call was routinely killed by its
-    # ceiling, reporting "0 torrents" while the list showed one downloading.
-    #
-    # Line 1 of the awk output is the aggregate, line 2 is the JSON array.
-    _bt=$(run_to 100 "$TR_BIN" "$TR_RPC" -n "$_auth" -t all -i 2>/dev/null | awk '
+    if [ -n "$_auth" ]; then
+        _o=$(run_to 200 "$TR_BIN" "$TR_RPC" -n "$_auth" -t all -i 2>/dev/null | awk '
         function jesc(v) { gsub(/\\/, "\\\\", v); gsub(/"/, "\\\"", v)
                            gsub(/[\t\r]/, " ", v); return v }
         function num(v)  { sub(/^[^:]*: */, "", v); return v + 0 }
@@ -159,9 +163,6 @@ bt_sample() {
         function flush(   row) {
             if (id == "") return
             n++
-            # "Up & Down" is downloading-and-seeding at once on an incomplete
-            # torrent; counting it as seeding reported a 94%-done torrent as
-            # seeding.
             if (state ~ /Downloading|Up & Down/) dl++
             else if (state ~ /Seeding/) sd++
             else if (state ~ /Stopped|Finished/) st++
@@ -169,9 +170,8 @@ bt_sample() {
             if (pct > pctmax) pctmax = pct
             row = sprintf("{\"id\":%s,\"n\":\"%s\",\"st\":\"%s\",\"pct\":%.1f,\"sz\":%.0f,\"dn\":%.0f,\"up\":%.0f,\"ra\":%.3f,\"pe\":%d,\"eta\":%d}",
                           id, jesc(nm), jesc(state), pct, size, dn, up, ra, pe, eta)
-            # NOT `arr = arr (cond ? a : b) row` -- busybox awk parses a
-            # variable followed directly by "(" as a call to an undefined
-            # function and dies with "Call to undefined function".
+            # NOT `arr (cond ? a : b)` -- busybox awk reads a variable followed
+            # by "(" as a call to an undefined function and dies at parse time.
             if (arr != "") arr = arr ","
             arr = arr row
             id = ""; nm = ""; state = ""; pct = 0; size = 0
@@ -191,14 +191,35 @@ bt_sample() {
         END { flush()
               printf "%d %d %d %d %.1f %.1f %d %d\n", n+0, dl+0, sd+0, st+0, dnsum+0, upsum+0, pesum+0, pctmax
               printf "[%s]\n", arr }')
+        # Only replace the last good sample when the call actually produced one.
+        case "$_o" in
+            *"["*) printf '%s\n' "$_o" > "$BT_OUT.tmp" 2>/dev/null && mv "$BT_OUT.tmp" "$BT_OUT" 2>/dev/null ;;
+        esac
+    fi
+    rmdir "$BT_LOCK" 2>/dev/null
+}
 
-    set -- $(echo "$_bt" | head -1)
-    b_n=${1:-0}; b_dl=${2:-0}; b_sd=${3:-0}; b_st=${4:-0}
-    b_down=${5:-0}; b_up=${6:-0}; b_peers=${7:-0}; b_pct=${8:--1}
-    b_tor=$(echo "$_bt" | tail -1)
-    case "$b_tor" in "["*"]") : ;; *) b_tor="[]" ;; esac
+bt_sample() {
+    b_on=0; b_ok=0; b_age=-1
+    b_n=0; b_dl=0; b_sd=0; b_st=0; b_down=0; b_up=0; b_peers=0; b_pct=-1; b_tor="[]"
+    [ -x "$TR_BIN" ] || return 0
+    [ -s "$TR_CREDS" ] || return 0
+    pidof transmission-daemon >/dev/null 2>&1 || return 0
+    b_on=1
 
-    # Lifetime totals: exact byte counters, no RPC and no unit parsing.
+    bt_probe &                                    # fire and forget
+
+    if [ -s "$BT_OUT" ]; then
+        b_age=$(( $(date +%s) - $(date -r "$BT_OUT" +%s 2>/dev/null || echo 0) ))
+        if [ "$b_age" -le "$BT_MAXAGE" ]; then
+            set -- $(head -1 "$BT_OUT")
+            b_n=${1:-0}; b_dl=${2:-0}; b_sd=${3:-0}; b_st=${4:-0}
+            b_down=${5:-0}; b_up=${6:-0}; b_peers=${7:-0}; b_pct=${8:--1}
+            b_tor=$(tail -1 "$BT_OUT")
+            case "$b_tor" in "["*"]") b_ok=1 ;; *) b_tor="[]" ;; esac
+        fi
+    fi
+
     if [ -s "$TR_STATS" ]; then
         set -- $(awk -F'[:,]' '/uploaded-bytes/{u=$2+0} /downloaded-bytes/{d=$2+0} END{printf "%.0f %.0f", u, d}' "$TR_STATS")
         b_ub=${1:-0}; b_db=${2:-0}
@@ -325,8 +346,8 @@ while :; do
     printf '"dhcp":{"on":%s,"start":"%s","end":"%s","lease":%s,"leases":%s},' \
            "$d_on" "$d_st" "$d_en" "$d_ls" "$s_leases"
     printf '"disks":%s,"opt":%s,' "$s_disks" "$s_opt"
-    printf '"bt":{"on":%s,"n":%s,"dl":%s,"sd":%s,"st":%s,"down":%s,"up":%s,"peers":%s,"ub":%s,"db":%s,"pct":%s,"tor":%s}' \
-           "$b_on" "$b_n" "$b_dl" "$b_sd" "$b_st" "$b_down" "$b_up" "$b_peers" "$b_ub" "$b_db" "$b_pct" "$b_tor"
+    printf '"bt":{"on":%s,"ok":%s,"age":%s,"n":%s,"dl":%s,"sd":%s,"st":%s,"down":%s,"up":%s,"peers":%s,"ub":%s,"db":%s,"pct":%s,"tor":%s}' \
+           "$b_on" "$b_ok" "$b_age" "$b_n" "$b_dl" "$b_sd" "$b_st" "$b_down" "$b_up" "$b_peers" "$b_ub" "$b_db" "$b_pct" "$b_tor"
     printf '}\n'
     } > "$TMP" 2>/dev/null
 
