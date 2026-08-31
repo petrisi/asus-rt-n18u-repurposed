@@ -17,7 +17,7 @@ more than they look**, and several of that repository's central techniques do
 not work here at all. Those differences are called out where they arise; the
 short version is in [99-gotchas.md](docs/99-gotchas.md).
 
-<img width="1775" height="918" alt="image" src="https://github.com/user-attachments/assets/093e9a3e-276d-42d1-8c1d-2f4e1cece45d" />
+<img width="1171" height="1868" alt="image" src="https://github.com/user-attachments/assets/50218d56-d841-444e-a8d7-e8225f927434" />
 
 ## What you get
 
