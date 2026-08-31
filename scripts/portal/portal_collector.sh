@@ -104,17 +104,29 @@ b_tor="[]"
 
 # Bounded run of an arbitrary command, same discipline as wl_to: a wedged
 # transmission-daemon must not freeze the whole collector.
+_rtseq=0
 run_to() {
     _lim=$1; shift
-    : > "$RUN/.rt"
-    ( unset LD_LIBRARY_PATH LD_PRELOAD; "$@" > "$RUN/.rt" 2>/dev/null ) &
+    # A UNIQUE temp file per call, and exec inside the subshell.
+    #
+    # Both matter. Without exec, $! is the SUBSHELL's pid, so the timeout kill
+    # leaves the real command orphaned -- and it then writes into the shared
+    # temp file afterwards, clobbering the NEXT call's output. That produced
+    # "0 torrents" while transmission was plainly downloading, because one
+    # call's result arrived in the other's buffer. With exec, $! is the command
+    # itself and the kill actually stops it; the unique path means a stray
+    # writer can still only corrupt its own file.
+    _rtseq=$((_rtseq + 1))
+    _tf="$RUN/.rt.$$.$_rtseq"
+    ( unset LD_LIBRARY_PATH LD_PRELOAD; exec "$@" > "$_tf" 2>/dev/null ) &
     _p=$!; _n=0
     while kill -0 "$_p" 2>/dev/null; do
         [ "$_n" -ge "$_lim" ] && { kill -9 "$_p" 2>/dev/null; break; }
         usleep 100000; _n=$((_n + 1))
     done
     wait "$_p" 2>/dev/null
-    cat "$RUN/.rt" 2>/dev/null
+    cat "$_tf" 2>/dev/null
+    rm -f "$_tf" 2>/dev/null
 }
 
 bt_sample() {
@@ -126,50 +138,46 @@ bt_sample() {
     [ -n "$_auth" ] || return 0
     b_on=1
 
-    # Torrent list -> counts by state and the Sum row's rates (kB/s).
-    # Parsed by keyword rather than column: names contain spaces and ETA can be
-    # one token ("Unknown") or two ("42 min"), so positions are not stable.
-    set -- $(run_to 50 "$TR_BIN" "$TR_RPC" -n "$_auth" -l 2>/dev/null | awk '
-        /^ *[0-9]+\*? +/ { n++
-            # "Up & Down" means both at once on an INCOMPLETE torrent, so it
-            # counts as downloading -- classifying it as seeding reported a
-            # 67%-complete torrent as "seeding", which is simply false.
-            if ($0 ~ /Downloading|Up & Down/) dl++
-            else if ($0 ~ /Seeding/) sd++
-            else if ($0 ~ /Stopped|Finished/) st++
-            if (match($2, /^[0-9]+/)) { p = substr($2, RSTART, RLENGTH) + 0; if (p > pct) pct = p }
-        }
-        /^Sum:/ { up = $(NF-1) + 0; dn = $NF + 0 }
-        END { printf "%d %d %d %d %.1f %.1f %d", n+0, dl+0, sd+0, st+0, dn+0, up+0, (pct=="" ? -1 : pct) }')
-    b_n=${1:-0}; b_dl=${2:-0}; b_sd=${3:-0}; b_st=${4:-0}
-    b_down=${5:-0}; b_up=${6:-0}; b_pct=${7:--1}
-
-    # Per-torrent detail. "-t all -i" is ONE call returning key:value blocks,
-    # which parses reliably; the column-aligned "-l" listing does not, because
-    # names contain spaces and ETA is one or two tokens.
+    # ONE RPC call for everything. "-t all -i" returns key/value blocks that
+    # parse reliably, and both the per-torrent list and the aggregate are
+    # derived from it -- so the summary can never disagree with the rows, and
+    # there is no second call to time out. The earlier design also called "-l"
+    # for the aggregate; under I/O load that call was routinely killed by its
+    # ceiling, reporting "0 torrents" while the list showed one downloading.
     #
-    # Torrent names are untrusted input (they come from .torrent files), so they
-    # are JSON-escaped here and inserted with textContent on the page.
-    b_tor=$(run_to 100 "$TR_BIN" "$TR_RPC" -n "$_auth" -t all -i 2>/dev/null | awk '
+    # Line 1 of the awk output is the aggregate, line 2 is the JSON array.
+    _bt=$(run_to 100 "$TR_BIN" "$TR_RPC" -n "$_auth" -t all -i 2>/dev/null | awk '
         function jesc(v) { gsub(/\\/, "\\\\", v); gsub(/"/, "\\\"", v)
                            gsub(/[\t\r]/, " ", v); return v }
         function num(v)  { sub(/^[^:]*: */, "", v); return v + 0 }
-        function sz(v,   a, n, u) { sub(/^[^:]*: */, "", v); n = v + 0
+        function sz(v,   n) { sub(/^[^:]*: */, "", v); n = v + 0
                            if (v ~ /kB/) return n * 1000
                            if (v ~ /MB/) return n * 1000000
                            if (v ~ /GB/) return n * 1000000000
                            if (v ~ /TB/) return n * 1000000000000
                            return n }
-        function flush() {
+        function flush(   row) {
             if (id == "") return
-            if (n++) printf ","
-            printf "{\"id\":%s,\"n\":\"%s\",\"st\":\"%s\",\"pct\":%.1f,\"sz\":%.0f,",
-                   id, jesc(nm), jesc(state), pct, size
-            printf "\"dn\":%.0f,\"up\":%.0f,\"ra\":%.3f,\"pe\":%d,\"eta\":%d}",
-                   dn, up, ra, pe, eta
-            id = ""; nm = ""; state = ""; pct = 0; size = 0; dn = 0; up = 0; ra = 0; pe = 0; eta = -1
+            n++
+            # "Up & Down" is downloading-and-seeding at once on an incomplete
+            # torrent; counting it as seeding reported a 94%-done torrent as
+            # seeding.
+            if (state ~ /Downloading|Up & Down/) dl++
+            else if (state ~ /Seeding/) sd++
+            else if (state ~ /Stopped|Finished/) st++
+            dnsum += dn; upsum += up; pesum += pe
+            if (pct > pctmax) pctmax = pct
+            row = sprintf("{\"id\":%s,\"n\":\"%s\",\"st\":\"%s\",\"pct\":%.1f,\"sz\":%.0f,\"dn\":%.0f,\"up\":%.0f,\"ra\":%.3f,\"pe\":%d,\"eta\":%d}",
+                          id, jesc(nm), jesc(state), pct, size, dn, up, ra, pe, eta)
+            # NOT `arr = arr (cond ? a : b) row` -- busybox awk parses a
+            # variable followed directly by "(" as a call to an undefined
+            # function and dies with "Call to undefined function".
+            if (arr != "") arr = arr ","
+            arr = arr row
+            id = ""; nm = ""; state = ""; pct = 0; size = 0
+            dn = 0; up = 0; ra = 0; pe = 0; eta = -1
         }
-        BEGIN { printf "["; id = ""; eta = -1 }
+        BEGIN { id = ""; eta = -1; pctmax = -1 }
         /^  Id: /             { flush(); id = num($0) }
         /^  Name: /           { nm = $0; sub(/^  Name: /, "", nm) }
         /^  State: /          { state = $0; sub(/^  State: /, "", state) }
@@ -180,12 +188,15 @@ bt_sample() {
         /^  Ratio: /          { ra = num($0) }
         /^  ETA: /            { if ($0 ~ /\(/) { e = $0; sub(/.*\(/, "", e); eta = e + 0 } }
         /connected to/        { for (i = 1; i <= NF; i++) if ($i == "to") { pe = $(i+1) + 0; break } }
-        END { flush(); printf "]" }')
-    case "$b_tor" in "["*"]") : ;; *) b_tor="[]" ;; esac
+        END { flush()
+              printf "%d %d %d %d %.1f %.1f %d %d\n", n+0, dl+0, sd+0, st+0, dnsum+0, upsum+0, pesum+0, pctmax
+              printf "[%s]\n", arr }')
 
-    # Aggregate peers from the same data rather than a second RPC call.
-    b_peers=$(echo "$b_tor" | awk 'BEGIN{RS=","} /"pe":/ { sub(/.*"pe":/,""); sub(/[^0-9].*/,""); s += $0 } END{printf "%d", s+0}')
-    [ -z "$b_peers" ] && b_peers=0
+    set -- $(echo "$_bt" | head -1)
+    b_n=${1:-0}; b_dl=${2:-0}; b_sd=${3:-0}; b_st=${4:-0}
+    b_down=${5:-0}; b_up=${6:-0}; b_peers=${7:-0}; b_pct=${8:--1}
+    b_tor=$(echo "$_bt" | tail -1)
+    case "$b_tor" in "["*"]") : ;; *) b_tor="[]" ;; esac
 
     # Lifetime totals: exact byte counters, no RPC and no unit parsing.
     if [ -s "$TR_STATS" ]; then

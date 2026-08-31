@@ -292,6 +292,36 @@ busybox `ash` truncates with no error. Interface byte counters pass 2^31 within
 days of uptime, so anything doing shell arithmetic on them starts producing
 zeroes that look like idle links. Do the maths in `awk`, which uses doubles.
 
+## busybox awk reads `var (` as a function call
+
+    arr = arr (arr == "" ? "" : ",") row      # "Call to undefined function"
+
+String concatenation with a parenthesised expression immediately after a
+variable name is ambiguous, and busybox awk resolves it as a call to a function
+named `arr`. The program dies at parse time, so the whole script silently
+produces nothing — which surfaced as a dashboard reporting "0 torrents" while
+transmission was plainly downloading.
+
+Split it, or put an operator between:
+
+    if (arr != "") arr = arr ","
+    arr = arr row
+
+## A backgrounded subshell hides the pid you need to kill
+
+    ( cmd > "$tmp" ) &
+    p=$!            # the SUBSHELL's pid, not cmd's
+    kill -9 "$p"    # kills the subshell; cmd is orphaned and keeps running
+
+The orphan then writes into `$tmp` after the timeout has "expired", clobbering
+whatever the *next* call put there. With a shared temp path that means one
+call's output arrives in another's buffer, intermittently, only under load.
+
+Use `exec` so the subshell is replaced by the command and `$!` is the command
+itself, and give each call its own temp file:
+
+    ( unset LD_LIBRARY_PATH; exec "$@" > "$tf" ) &
+
 ## Missing utilities
 
 This is a thinner busybox than the GT-AC5300's. Absent, among others:
