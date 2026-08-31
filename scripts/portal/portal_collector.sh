@@ -96,12 +96,24 @@ slow_sample() {
     [ "$(wl_to "$WLIF" bss | head -1)" = "up" ] && s_wup=1 || s_wup=0
     s_clients=$(wl_to "$WLIF" assoclist | grep -c "^assoclist")
 
-    # DHCP leases: expiry, mac, ip, name
+    # DHCP leases.
+    #
+    # FIELD 1 IS SECONDS REMAINING, NOT AN ABSOLUTE EXPIRY. Standard dnsmasq
+    # writes an absolute epoch there, but this router has no RTC, so ASUS
+    # builds dnsmasq with HAVE_BROKEN_RTC, which stores the remaining lease
+    # time instead. Treating it as an epoch renders every lease as January
+    # 1970 -- which is exactly what it looked like.
+    #
+    # Emit both: "r" is the honest datum (remaining seconds, correct even when
+    # the clock is wrong), "e" is the absolute expiry derived from the router's
+    # current time for convenience. A 0 means an infinite/static lease.
     if [ -s "$LEASES" ]; then
-        s_leases=$(awk 'BEGIN{printf "["; n=0}
+        s_leases=$(awk -v now="$(date +%s)" 'BEGIN{printf "["; n=0}
             NF>=4 { if(n++)printf ","
                     name=$4; if(name=="*")name="";
-                    printf "{\"e\":%.0f,\"m\":\"%s\",\"i\":\"%s\",\"n\":\"%s\"}", $1, $2, $3, name }
+                    rem=$1+0;
+                    printf "{\"r\":%.0f,\"e\":%.0f,\"m\":\"%s\",\"i\":\"%s\",\"n\":\"%s\"}", \
+                           rem, (rem>0 ? now+rem : 0), $2, $3, name }
             END{printf "]"}' "$LEASES")
     else
         s_leases="[]"

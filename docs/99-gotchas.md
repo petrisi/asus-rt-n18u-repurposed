@@ -278,6 +278,24 @@ Check before relying on anything outside the obvious core.
 `/root` is a symlink to `/tmp/home/root`. Anything writing config to `$HOME`
 loses it on reboot.
 
+## dnsmasq lease times are SECONDS REMAINING, not an absolute expiry
+
+A direct consequence of the missing RTC below. Standard dnsmasq writes an
+absolute epoch in field 1 of `dnsmasq.leases`; ASUS builds it with
+`HAVE_BROKEN_RTC`, which stores the **remaining lease time** instead:
+
+    86400 8c:1d:96:ee:f5:d9 192.168.1.226 DESKTOP-FHLIGI7 01:8c:1d:...
+    85727 60:d8:9c:71:06:40 192.168.1.4   Nokia-X20       01:60:d8:...
+
+86400 is exactly `nvram get dhcp_lease`, and the second value is that minus the
+elapsed time — the giveaway. Feeding it to `new Date(v * 1000)` renders every
+lease as **January 1970**, which is how this surfaced.
+
+Prefer the remaining time when displaying it: it stays correct even while the
+clock is wrong, which on this platform is every boot before NTP syncs. Derive an
+absolute expiry as `now + remaining` only as a convenience, and treat `0` as an
+infinite/static lease.
+
 ## There is no RTC — the clock is wrong until NTP
 
 With no WAN connection the router boots believing it is 2018. This matters for
