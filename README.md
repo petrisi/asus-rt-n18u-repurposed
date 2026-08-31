@@ -44,6 +44,8 @@ short version is in [99-gotchas.md](docs/99-gotchas.md).
 | [04-usb-and-entware.md](docs/04-usb-and-entware.md) | storage and a package manager |
 | [05-dashboard.md](docs/05-dashboard.md) | the status portal |
 | [06-bittorrent.md](docs/06-bittorrent.md) | Transmission, on a second disk |
+| [08-exposure.md](docs/08-exposure.md) | **it now faces the internet directly** |
+| [09-single-disk-migration.md](docs/09-single-disk-migration.md) | prepared runbook: consolidate onto one disk |
 | [07-rrd-history.md](docs/07-rrd-history.md) | long-term history (optional) |
 | [99-gotchas.md](docs/99-gotchas.md) | **the platform traps — read this before debugging anything** |
 

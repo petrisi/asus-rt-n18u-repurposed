@@ -42,7 +42,12 @@ WANIF=$(nvram get wan0_ifname 2>/dev/null); [ -z "$WANIF" ] && WANIF=eth0
 
 # Single instance: script_usbmount fires on every USB mount event.
 mkdir "$LOCKDIR" 2>/dev/null || exit 0
-trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT INT TERM
+# See services.sh: a TERM handler that returns without exiting leaves the
+# process alive but unlocked, which lets a duplicate start.
+_cleanup() { rmdir "$LOCKDIR" 2>/dev/null; }
+trap '_cleanup' EXIT
+trap '_cleanup; exit 143' TERM
+trap '_cleanup; exit 130' INT
 
 [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 65536 ] && rm -f "$LOG"
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }

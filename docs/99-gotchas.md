@@ -160,6 +160,26 @@ the variable.
 
     ( unset LD_LIBRARY_PATH LD_PRELOAD ; /opt/bin/whatever )
 
+## A signal trap that does not exit leaves the process running and unlocked
+
+    trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT INT TERM     # WRONG
+
+A shell resumes execution after a signal handler returns. So on SIGTERM this
+releases the lock and **keeps running** — `killall` appears to do nothing, and
+the next launch acquires the now-free lock and starts a duplicate. Observed
+exactly that: two `portal_start.sh` and two `transmission.sh` at once.
+
+    _cleanup() { rmdir "$LOCKDIR" 2>/dev/null; }          # RIGHT
+    trap '_cleanup' EXIT
+    trap '_cleanup; exit 143' TERM
+    trap '_cleanup; exit 130' INT
+
+Related: **busybox `ash` defers traps until the running command finishes.** A
+stage sitting in `sleep 60` will not react to SIGTERM for up to a minute, so a
+`killall` followed by a three-second check reports failure while the signal is
+simply still queued. Wait out the interval before concluding anything, and use
+`kill -9` only when you have.
+
 ## A hung process does not answer SIGTERM
 
 `killall foo` sends SIGTERM, which a stopped or otherwise wedged process never

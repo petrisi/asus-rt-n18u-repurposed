@@ -37,7 +37,12 @@ if ! mkdir "$RUN/.portal.lock.d" 2>/dev/null; then
     log "another portal_start.sh is already running, exiting"
     exit 0
 fi
-trap 'rmdir "$RUN/.portal.lock.d" 2>/dev/null' EXIT INT TERM
+# See services.sh: a TERM handler that returns without exiting leaves the
+# process alive but unlocked, which lets a duplicate start.
+_cleanup() { rmdir "$RUN/.portal.lock.d" 2>/dev/null; }
+trap '_cleanup' EXIT
+trap '_cleanup; exit 143' TERM
+trap '_cleanup; exit 130' INT
 
 # lighttpd modules live in /usr/lib on this firmware, NOT /usr/lib/lighttpd,
 # which is the default the binary would otherwise look in.

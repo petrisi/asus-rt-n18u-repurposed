@@ -48,7 +48,14 @@ INTERVAL=60
 if ! mkdir "$LOCKDIR" 2>/dev/null; then
     exit 0
 fi
-trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT INT TERM
+# A signal trap that does NOT exit leaves the process running with its lock
+# already removed -- so `killall` appears to do nothing, and the next launch
+# acquires a fresh lock and starts a DUPLICATE. Observed exactly that. The
+# handler must release the lock AND terminate.
+_cleanup() { rmdir "$LOCKDIR" 2>/dev/null; }
+trap '_cleanup' EXIT
+trap '_cleanup; exit 143' TERM
+trap '_cleanup; exit 130' INT
 
 [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 65536 ] && rm -f "$LOG"
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
