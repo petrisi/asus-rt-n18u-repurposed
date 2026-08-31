@@ -78,7 +78,76 @@ radio has its own sensor via `wl -i eth1 phy_tempsense`, reported separately.
 The page is also shaped for this hardware rather than the GT-AC5300's: one CPU
 core, one 2.4 GHz radio, four LAN ports.
 
-## Protecting it
+## Protecting it, and exposing it safely
+
+**Layout:** plain HTTP on `8080` bound to the LAN address only; **HTTPS on
+`8443` bound to `0.0.0.0`** and accepted from the WAN. Digest auth is global, so
+both sockets — and every JSON endpoint behind them — require credentials.
+
+    LAN   http://192.168.1.1:8080/     digest auth
+    LAN   https://192.168.1.1:8443/    digest auth
+    WAN   https://<public-ip>:8443/    digest auth      <- the only WAN path
+    WAN   http  :8080                  DROPped
+
+### Why TLS and not just digest auth
+
+Digest auth protects the *password* — it is never sent in the clear. It does
+nothing for the *payload*. Over plain HTTP to the internet, every sample the
+dashboard serves (WAN address, traffic rates, DHCP leases with hostnames and
+MACs, uptime, temperatures) is readable by anyone on the path. That is a
+worthwhile amount of information about a home network to hand out.
+
+lighttpd 1.4.39 on this firmware has SSL compiled in, and `/usr/sbin/openssl`
+exists, so TLS costs nothing but a self-signed certificate:
+
+    openssl req -new -x509 -nodes -newkey rsa:2048 -days 3650 \
+      -subj "/CN=RT-N18U/O=rtn18u-portal" -keyout k.pem -out c.pem
+    cat k.pem c.pem > /jffs/portal/portal.pem && chmod 600 /jffs/portal/portal.pem
+
+Browsers will warn once. **Check the fingerprint rather than clicking through**
+— that is the only thing standing in for a CA here:
+
+    openssl x509 -in /jffs/portal/portal.pem -noout -fingerprint -sha256
+
+### The firewall rule is conditional on the password existing
+
+`ensure_fw()` only inserts the WAN ACCEPT for 8443 when **both** the
+certificate and `.htdigest` are present, and actively deletes it otherwise. An
+exposed dashboard with no password is a far worse failure than an unreachable
+one, so the rule is tied to the thing that protects it rather than being set
+once and trusted.
+
+### Credentials
+
+`/jffs/portal/.htdigest`, mode 600, outside the document root, and
+`url.access-deny` refuses it explicitly (verified: 403). The format is
+`user:realm:MD5(user:realm:password)` and the realm must match `REALM` in
+`portal_start.sh` — a digest hash is computed over the realm, so a mismatch
+makes every login fail silently.
+
+    printf 'admin:rtn18u:%s' "$PASSWORD" | md5sum   # -> the hash field
+
+### Verify from outside, not from the rule listing
+
+    curl -sk -o /dev/null -w '%{http_code}\n' https://<public-ip>:8443/          # 401
+    curl -sk --digest -u admin:<pw> -o /dev/null -w '%{http_code}\n' \
+         https://<public-ip>:8443/                                              # 200
+    curl -s  -o /dev/null -w '%{http_code}\n' http://<public-ip>:8080/          # filtered
+
+### Residual risk, stated plainly
+
+This publishes a **2016 web server on an EOL firmware that will never be
+patched** to the whole internet. TLS and a strong password address
+eavesdropping and guessing; they do nothing about a flaw in lighttpd itself.
+If you do not need remote access continuously, an SSH tunnel gives the same
+result with no listener exposed:
+
+    ssh -L 8080:192.168.1.1:8080 admin@<router>
+
+Consider also restricting the ACCEPT rule to known source addresses, and note
+that port 8443 will attract background scanning within hours.
+
+## Older notes on protecting it
 
 `portal_start.sh` binds lighttpd to the LAN address (`server.bind`) rather than
 `0.0.0.0`, so the WAN interface is not listening in the first place. The

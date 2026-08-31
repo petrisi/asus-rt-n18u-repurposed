@@ -12,10 +12,15 @@ must happen before it carries anything real.
   the web API and telnet. See the note below — the obvious way to change it
   does not work.
 
-- **Dashboard authentication.** Still open: the portal runs unauthenticated on
-  the LAN and logs a NOTE saying so at every start. Create
-  `/jffs/portal/.htdigest` with realm `rtn18u` to enable it
-  (`docs/05-dashboard.md`).
+- ~~**Dashboard authentication.**~~ Done 2026-08-31. Digest auth on both
+  sockets, and the dashboard is now reachable from the WAN over **HTTPS only**
+  (8443, self-signed); plain HTTP 8080 stays LAN-only and is DROPped on the
+  WAN. Verified from the internet side: 401 without credentials, 200 with.
+  See `docs/08-exposure.md` and `docs/05-dashboard.md`.
+
+  Residual risk accepted knowingly: this exposes lighttpd 1.4.39 on unpatched
+  EOL firmware to the internet. Worth revisiting if remote access stops being
+  needed — an SSH tunnel achieves the same with no listener exposed.
 
   Consider also whether the radio is wanted at all. No client has ever
   associated; if the box is wired-only, disabling the radio

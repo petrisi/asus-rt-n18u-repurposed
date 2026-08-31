@@ -18,6 +18,8 @@ PIDF="$RUN/lighttpd.pid"
 JSON="$RUN/status.json"
 STALE=150          # seconds without a status.json update before restarting the collector
 PORT=8080          # NOT 80: ASUS httpd owns port 80 on the LAN address and loopback
+PORT_SSL=8443      # HTTPS socket, the ONLY one exposed to the WAN
+CERT="$PORTAL/portal.pem"   # self-signed, key+cert combined
 AUTHFILE="$PORTAL/.htdigest"   # deliberately NOT under www/ (would be downloadable)
 REALM=rtn18u
 POLL=30
@@ -67,6 +69,21 @@ write_conf() {
     # Never serve dotfiles -- the digest file lives outside www/ anyway, but
     # this closes the class of mistake rather than the instance.
     echo "url.access-deny      = ( \"~\", \".inc\", \".htdigest\" )"
+    # HTTPS socket. Bound to 0.0.0.0 so it answers on the WAN too; plain HTTP
+    # stays bound to the LAN address only. Digest auth below is global, so it
+    # applies to this socket as well.
+    #
+    # Serving the dashboard over plain HTTP to the internet would protect the
+    # password (digest) while leaving every byte of telemetry readable on the
+    # wire. TLS fixes that. The certificate is self-signed, so browsers warn
+    # once -- check the fingerprint rather than clicking through blindly:
+    #   openssl x509 -in portal.pem -noout -fingerprint -sha256
+    if [ -s "$CERT" ]; then
+        echo "\$SERVER[\"socket\"] == \"0.0.0.0:$PORT_SSL\" {"
+        echo "  ssl.engine  = \"enable\""
+        echo "  ssl.pemfile = \"$CERT\""
+        echo "}"
+    fi
     if [ -s "$AUTHFILE" ]; then
         echo "auth.backend                   = \"htdigest\""
         echo "auth.backend.htdigest.userfile = \"$AUTHFILE\""
@@ -82,11 +99,30 @@ write_conf() {
 # Accept the port on the LAN bridge, drop it on WAN. Idempotent: rules are
 # deleted before being re-added, so repeated supervision passes cannot stack
 # duplicates up.
+# Plain HTTP stays DROPped on the WAN; only the TLS socket is accepted there.
+# Idempotent: delete before insert, so repeated passes cannot stack duplicates.
+# Note this resets the rule counters each pass -- they are not usable for
+# cumulative accounting.
 ensure_fw() {
-    iptables -D INPUT -i "$WANIF" -p tcp --dport "$PORT" -j DROP 2>/dev/null
-    iptables -I INPUT -i "$WANIF" -p tcp --dport "$PORT" -j DROP 2>/dev/null
+    iptables  -D INPUT -i "$WANIF" -p tcp --dport "$PORT" -j DROP 2>/dev/null
+    iptables  -I INPUT 1 -i "$WANIF" -p tcp --dport "$PORT" -j DROP 2>/dev/null
     ip6tables -D INPUT -i "$WANIF" -p tcp --dport "$PORT" -j DROP 2>/dev/null
-    ip6tables -I INPUT -i "$WANIF" -p tcp --dport "$PORT" -j DROP 2>/dev/null
+    ip6tables -I INPUT 1 -i "$WANIF" -p tcp --dport "$PORT" -j DROP 2>/dev/null
+
+    # HTTPS: accepted from the WAN, but ONLY when both the certificate and the
+    # credentials file exist. An exposed dashboard with no password would be a
+    # much worse failure than an unreachable one, so the rule is conditional on
+    # the thing that protects it.
+    if [ -s "$CERT" ] && [ -s "$AUTHFILE" ]; then
+        iptables  -D INPUT -i "$WANIF" -p tcp --dport "$PORT_SSL" -j ACCEPT 2>/dev/null
+        iptables  -I INPUT 1 -i "$WANIF" -p tcp --dport "$PORT_SSL" -j ACCEPT 2>/dev/null
+        ip6tables -D INPUT -i "$WANIF" -p tcp --dport "$PORT_SSL" -j ACCEPT 2>/dev/null
+        ip6tables -I INPUT 1 -i "$WANIF" -p tcp --dport "$PORT_SSL" -j ACCEPT 2>/dev/null
+    else
+        iptables  -D INPUT -i "$WANIF" -p tcp --dport "$PORT_SSL" -j ACCEPT 2>/dev/null
+        ip6tables -D INPUT -i "$WANIF" -p tcp --dport "$PORT_SSL" -j ACCEPT 2>/dev/null
+        log "WAN HTTPS rule withheld: cert or .htdigest missing"
+    fi
 }
 
 # Run a job at most every $2 seconds, never overlapping itself.
@@ -163,7 +199,13 @@ killall lighttpd 2>/dev/null
 sleep 1
 
 log "=== portal start, uptime $(cut -d' ' -f1 /proc/uptime) ==="
-[ -s "$AUTHFILE" ] || log "NOTE: $AUTHFILE absent -- dashboard is unauthenticated on the LAN"
+if [ -s "$AUTHFILE" ]; then
+    log "digest auth enabled (realm $REALM)"
+    [ -s "$CERT" ] && log "HTTPS on :$PORT_SSL exposed to WAN; plain HTTP :$PORT stays LAN-only" \
+                   || log "NOTE: no certificate -- HTTPS disabled, WAN not exposed"
+else
+    log "NOTE: $AUTHFILE absent -- dashboard is UNAUTHENTICATED and WAN exposure is withheld"
+fi
 start_lighttpd
 start_collector
 ensure_fw

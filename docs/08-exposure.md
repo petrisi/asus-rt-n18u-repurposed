@@ -11,7 +11,11 @@ Probed from the internet side — not from the LAN, and not by reading the confi
 | port | result |
 |---|---|
 | **tcp/51413** | **OPEN** — BitTorrent peer port, intended |
+| **tcp/8443** | **OPEN** — dashboard over HTTPS, digest auth required (401 without) |
 | tcp/22, 23, 80, 443, 8080, 8200, 9091, 139, 445 | filtered |
+
+Note 8080 stays filtered deliberately: the dashboard's plain-HTTP socket is
+bound to the LAN address only, and the WAN path is the TLS socket on 8443.
 
 Do this yourself rather than trusting a rule listing. From a host that reaches
 the internet independently of the router (a laptop on another network, a phone
