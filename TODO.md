@@ -37,9 +37,16 @@ Remaining there:
   attached. Moving it raises the ceiling — but USB 3.0 is a well-known 2.4 GHz
   interference source and 2.4 GHz is this router's **only** radio. Measure the
   Wi-Fi cost before taking the throughput.
-- **Upstream port forwarding.** This router sits behind another one, so
-  inbound peers need 51413 forwarded there too, or it will only seed to peers
-  it dials out to.
+- ~~**Upstream port forwarding.**~~ Resolved: since the router was moved it
+  has a public WAN IP and is directly internet-facing. Verified from the
+  internet side that tcp/51413 is reachable and everything else
+  (22/23/80/443/8080/8200/9091/139/445) is filtered by the catch-all DROP, so
+  inbound peers now connect directly with no upstream forwarding.
+
+- **The credential work is now more urgent.** With a public WAN address the
+  deferred items above (dashboard auth, Wi-Fi passphrase, admin password) are
+  no longer protected by a second layer of NAT. Nothing is exposed to the WAN
+  today, but the margin for a mistake is thinner.
 
 ## Open questions
 
