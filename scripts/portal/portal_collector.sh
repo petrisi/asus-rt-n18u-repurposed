@@ -100,6 +100,7 @@ json_escape() { sed 's/\\/\\\\/g; s/"/\\"/g' ; }
 s_wtemp=0; s_wrate=""; s_wnoise=0; s_wchan=0; s_wup=0; s_clients=0
 s_leases="[]"; s_disks="[]"; s_opt=0
 b_on=0; b_n=0; b_dl=0; b_sd=0; b_st=0; b_down=0; b_up=0; b_peers=0; b_ub=0; b_db=0; b_pct=-1
+b_tor="[]"
 
 # Bounded run of an arbitrary command, same discipline as wl_to: a wedged
 # transmission-daemon must not freeze the whole collector.
@@ -143,10 +144,47 @@ bt_sample() {
     b_n=${1:-0}; b_dl=${2:-0}; b_sd=${3:-0}; b_st=${4:-0}
     b_down=${5:-0}; b_up=${6:-0}; b_pct=${7:--1}
 
-    # Peers across active torrents, one call.
-    b_peers=$(run_to 50 "$TR_BIN" "$TR_RPC" -n "$_auth" -t active -i 2>/dev/null | awk '
-        /connected to/ { for (i = 1; i <= NF; i++) if ($i == "to") { s += $(i+1) + 0; break } }
-        END { printf "%d", s+0 }')
+    # Per-torrent detail. "-t all -i" is ONE call returning key:value blocks,
+    # which parses reliably; the column-aligned "-l" listing does not, because
+    # names contain spaces and ETA is one or two tokens.
+    #
+    # Torrent names are untrusted input (they come from .torrent files), so they
+    # are JSON-escaped here and inserted with textContent on the page.
+    b_tor=$(run_to 100 "$TR_BIN" "$TR_RPC" -n "$_auth" -t all -i 2>/dev/null | awk '
+        function jesc(v) { gsub(/\\/, "\\\\", v); gsub(/"/, "\\\"", v)
+                           gsub(/[\t\r]/, " ", v); return v }
+        function num(v)  { sub(/^[^:]*: */, "", v); return v + 0 }
+        function sz(v,   a, n, u) { sub(/^[^:]*: */, "", v); n = v + 0
+                           if (v ~ /kB/) return n * 1000
+                           if (v ~ /MB/) return n * 1000000
+                           if (v ~ /GB/) return n * 1000000000
+                           if (v ~ /TB/) return n * 1000000000000
+                           return n }
+        function flush() {
+            if (id == "") return
+            if (n++) printf ","
+            printf "{\"id\":%s,\"n\":\"%s\",\"st\":\"%s\",\"pct\":%.1f,\"sz\":%.0f,",
+                   id, jesc(nm), jesc(state), pct, size
+            printf "\"dn\":%.0f,\"up\":%.0f,\"ra\":%.3f,\"pe\":%d,\"eta\":%d}",
+                   dn, up, ra, pe, eta
+            id = ""; nm = ""; state = ""; pct = 0; size = 0; dn = 0; up = 0; ra = 0; pe = 0; eta = -1
+        }
+        BEGIN { printf "["; id = ""; eta = -1 }
+        /^  Id: /             { flush(); id = num($0) }
+        /^  Name: /           { nm = $0; sub(/^  Name: /, "", nm) }
+        /^  State: /          { state = $0; sub(/^  State: /, "", state) }
+        /^  Percent Done: /   { pct = num($0) }
+        /^  Total size: /     { size = sz($0) }
+        /^  Download Speed: / { dn = num($0) }
+        /^  Upload Speed: /   { up = num($0) }
+        /^  Ratio: /          { ra = num($0) }
+        /^  ETA: /            { if ($0 ~ /\(/) { e = $0; sub(/.*\(/, "", e); eta = e + 0 } }
+        /connected to/        { for (i = 1; i <= NF; i++) if ($i == "to") { pe = $(i+1) + 0; break } }
+        END { flush(); printf "]" }')
+    case "$b_tor" in "["*"]") : ;; *) b_tor="[]" ;; esac
+
+    # Aggregate peers from the same data rather than a second RPC call.
+    b_peers=$(echo "$b_tor" | awk 'BEGIN{RS=","} /"pe":/ { sub(/.*"pe":/,""); sub(/[^0-9].*/,""); s += $0 } END{printf "%d", s+0}')
     [ -z "$b_peers" ] && b_peers=0
 
     # Lifetime totals: exact byte counters, no RPC and no unit parsing.
@@ -276,8 +314,8 @@ while :; do
     printf '"dhcp":{"on":%s,"start":"%s","end":"%s","lease":%s,"leases":%s},' \
            "$d_on" "$d_st" "$d_en" "$d_ls" "$s_leases"
     printf '"disks":%s,"opt":%s,' "$s_disks" "$s_opt"
-    printf '"bt":{"on":%s,"n":%s,"dl":%s,"sd":%s,"st":%s,"down":%s,"up":%s,"peers":%s,"ub":%s,"db":%s,"pct":%s}' \
-           "$b_on" "$b_n" "$b_dl" "$b_sd" "$b_st" "$b_down" "$b_up" "$b_peers" "$b_ub" "$b_db" "$b_pct"
+    printf '"bt":{"on":%s,"n":%s,"dl":%s,"sd":%s,"st":%s,"down":%s,"up":%s,"peers":%s,"ub":%s,"db":%s,"pct":%s,"tor":%s}' \
+           "$b_on" "$b_n" "$b_dl" "$b_sd" "$b_st" "$b_down" "$b_up" "$b_peers" "$b_ub" "$b_db" "$b_pct" "$b_tor"
     printf '}\n'
     } > "$TMP" 2>/dev/null
 

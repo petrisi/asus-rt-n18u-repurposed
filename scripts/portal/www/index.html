@@ -71,6 +71,10 @@ footer{padding:10px 18px 26px;color:var(--dim);font-size:12px;text-align:center}
   font-variant-numeric:tabular-nums;margin:0 0 5px}
 .chart .sm b{color:var(--ink);font-weight:600}
 .chart svg{display:block;width:100%;height:auto;overflow:visible}
+.pbar{display:inline-block;width:66px;height:6px;background:var(--line);
+  border-radius:99px;overflow:hidden;vertical-align:middle;margin-right:7px}
+.pbar>i{display:block;height:100%;background:var(--accent);border-radius:99px}
+#tortab td:first-child{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chart .empty2{height:186px;display:flex;align-items:center;justify-content:center;
   color:var(--dim);font-size:12px;border:1px solid var(--line);border-radius:6px}
 #htip{position:fixed;z-index:50;pointer-events:none;display:none;background:var(--panel);
@@ -171,6 +175,15 @@ footer{padding:10px 18px 26px;color:var(--dim);font-size:12px;text-align:center}
   <section>
     <h2>Storage</h2>
     <div id="disks"></div>
+  </section>
+
+  <section style="grid-column:1/-1">
+    <h2>Torrents <span id="torn" class="meta"></span></h2>
+    <div class="wrap"><table id="tortab">
+      <thead><tr><th>Name</th><th>State</th><th>Progress</th><th>Size</th>
+      <th>Down</th><th>Up</th><th>Ratio</th><th>Peers</th><th>ETA</th></tr></thead>
+      <tbody></tbody></table></div>
+    <div class="empty" id="notor" hidden></div>
   </section>
 
   <section style="grid-column:1/-1">
@@ -304,6 +317,46 @@ function render(d){
     set("btub", bytes(bt.ub / 1024));
     set("btratio", bt.db > 0 ? (bt.ub / bt.db).toFixed(3) : "–");
   }
+
+  // Per-torrent table. Names come from .torrent files and are untrusted, so
+  // every cell is built with createElement/textContent, never innerHTML.
+  var tt = document.querySelector("#tortab tbody"), TL = (bt.tor || []);
+  tt.textContent = "";
+  TL.forEach(function(t){
+    var tr = document.createElement("tr");
+    function cell(txt, cls, title){
+      var td = document.createElement("td");
+      if (cls) td.className = cls;
+      td.textContent = txt;
+      if (title) td.title = title;
+      tr.appendChild(td);
+      return td;
+    }
+    cell(t.n, "", t.n);
+    var stc = cell(t.st);
+    stc.style.color = /Seeding/.test(t.st) ? css("--ok")
+                    : /Stopped|Finished/.test(t.st) ? css("--dim") : css("--accent");
+    // Progress: a bar plus the number, so it is readable without colour alone.
+    var pd = document.createElement("td");
+    var bar = document.createElement("span"); bar.className = "pbar";
+    var fill = document.createElement("i");
+    fill.style.width = Math.max(0, Math.min(t.pct, 100)) + "%";
+    bar.appendChild(fill); pd.appendChild(bar);
+    pd.appendChild(document.createTextNode(t.pct.toFixed(1) + "%"));
+    tr.appendChild(pd);
+    cell(bytes(t.sz / 1024));
+    cell(t.dn ? rate(t.dn * 1000) : "–");
+    cell(t.up ? rate(t.up * 1000) : "–");
+    cell(t.ra >= 0 ? t.ra.toFixed(2) : "–");
+    cell(t.pe);
+    cell(t.eta > 0 ? dur(t.eta) : "–");
+    tt.appendChild(tr);
+  });
+  document.getElementById("tortab").hidden = !TL.length;
+  var ntor = document.getElementById("notor");
+  ntor.hidden = !!TL.length;
+  ntor.textContent = bt.on ? "No torrents loaded." : "Transmission is not running.";
+  set("torn", TL.length ? "(" + TL.length + ")" : "");
 
   var dv = document.getElementById("disks"), h = "";
   (d.disks || []).forEach(function(x){

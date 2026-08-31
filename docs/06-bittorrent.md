@@ -169,6 +169,19 @@ human-formatted "12.29 MB" to parse back into a number.
 **Rates are GAUGE, not DERIVE.** Transmission reports kB/s — already a rate.
 DERIVE would differentiate it a second time and render nonsense.
 
+**Per-torrent detail comes from `-t all -i`, not `-l`.** That is one RPC call
+returning key/value blocks, which parse reliably. The column-aligned `-l`
+listing does not: names contain spaces and ETA is sometimes one token
+("Unknown") and sometimes two ("42 min"), so column positions shift. The
+aggregate peer count is summed from the same output rather than costing a
+second call.
+
+**Torrent names are untrusted input.** They come from `.torrent` files, so they
+are JSON-escaped in the collector (quotes, backslashes, tabs) and inserted into
+the page with `createElement`/`textContent`, never `innerHTML`. Verified against
+a name containing `"` and `\` and a tab: the output stays valid JSON and the
+name survives intact.
+
 One parsing note: torrent state is matched by keyword, not column position,
 because names contain spaces and ETA is sometimes one token ("Unknown") and
 sometimes two ("42 min"). `Up & Down` counts as **downloading** — it means both
