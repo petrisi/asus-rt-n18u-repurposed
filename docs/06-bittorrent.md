@@ -7,6 +7,8 @@ this hardware is actually good at.
 Distribute things you have the right to distribute. Linux images are the
 obvious case and the one this was built for.
 
+<img width="1148" height="117" alt="image" src="https://github.com/user-attachments/assets/41fea479-9815-4e16-9f51-0d7739efc859" />
+
 ## Why this needs a second disk, unlike the sibling project
 
 On the GT-AC5300 the USB stick is storage. **Here it is the ignition key.**
