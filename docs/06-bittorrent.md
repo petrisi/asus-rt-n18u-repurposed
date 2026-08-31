@@ -7,7 +7,7 @@ this hardware is actually good at.
 Distribute things you have the right to distribute. Linux images are the
 obvious case and the one this was built for.
 
-<img width="1148" height="117" alt="image" src="https://github.com/user-attachments/assets/41fea479-9815-4e16-9f51-0d7739efc859" />
+<img width="1160" height="211" alt="image" src="https://github.com/user-attachments/assets/595544b4-55e5-4f2e-a693-4662a071ac7b" />
 
 ## Why this needs a second disk, unlike the sibling project
 
