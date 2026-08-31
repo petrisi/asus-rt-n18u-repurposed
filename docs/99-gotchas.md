@@ -14,6 +14,34 @@ Same vendor, same OS, opposite answers. Verify per device:
 
     strings /sbin/rc | grep -n -B8 -A8 <thing you are assuming>
 
+## wps_enable=0 does not stop wps_monitor
+
+A specific and useful case of the entry below. `wps_monitor` binds **udp/1900**
+— WPS's UPnP external-registrar, unrelated to `miniupnpd` — so stopping UPnP
+leaves the SSDP port open. Setting `wps_enable=0` and running
+`service restart_wireless` brings the daemon straight back.
+
+`killall wps_monitor` works and it does not respawn. Verified that the radio
+keeps beaconing afterwards (`wl bss` up, `wl isup` 1) with `eapd`, `nas` and
+`wlceventd` unaffected — though with no clients associated, client
+authentication itself was not exercised.
+
+To find out what actually holds a port when `netstat -p` is unavailable
+(busybox has no `-p`), match the socket inode by hand:
+
+    awk 'NR>1 {split($2,a,":"); if (a[2]=="076C") print $10}' /proc/net/udp
+    # then grep that inode in /proc/*/fd
+
+## The admin password lives in three places; nvram alone changes none of them
+
+`nvram set http_passwd=<plaintext>` is accepted, survives `nvram commit`, and
+does nothing: `httpd` validates against the hashed `acc_list`, and telnet
+against `/etc/shadow`. Both are derived only when the change goes through the
+GUI form. Post it to `start_apply.htm` with `action_script=restart_httpd`
+instead, then verify against **both** the web API and telnet — they consult
+different stores, so testing one proves nothing about the other. See
+`TODO.md` for the full recipe.
+
 ## nvram accepts settings for features the firmware does not have
 
 Writing `sshd_enable` and `sshd_authkeys` on stock RT-N18U appears to succeed
@@ -130,6 +158,30 @@ authoritative and unmounts any duplicate of the same device elsewhere under
 Note also that the automounter is unreliable in timing: on one boot it had not
 mounted a freshly formatted ext4 volume even after three minutes, and on the
 next it got there first. Do not depend on either outcome.
+
+## The automounter sometimes uses /tmp/mnt/<LABEL>(1) even with nothing at the plain name
+
+Separate from the duplicate-mount entry below, and more insidious. After one
+reboot the boot volume came up mounted **only** at `/tmp/mnt/ROUTERDATA(1)`,
+with `/tmp/mnt/ROUTERDATA` not existing at all:
+
+    /dev/sdc1 /tmp/mnt/ROUTERDATA(1) ext3 ...
+    /dev/sdc1 /tmp/opt               ext3 ...
+
+Anything resolving the volume dynamically kept working — `services.sh` found it
+by label, so `/opt`, SSH and Entware were all fine. Anything with a **hardcoded**
+`/tmp/mnt/<LABEL>` silently did nothing: `rrd_feeder.sh` and `rrd_export.sh`
+failed their mount check and exited 0, so the history stopped being collected
+and the dashboard reported "no history" while the databases sat intact a few
+characters away.
+
+**Never hardcode `/tmp/mnt/<LABEL>`.** Resolve it:
+
+    dev=$(blkid | grep "LABEL=\"$LABEL\"" | cut -d: -f1)
+    mp=$(awk -v d="$dev" '$1==d {print $2; exit}' /proc/mounts)
+
+Note the mountpoint can then contain parentheses, so every use of it must be
+quoted.
 
 ## Device nodes are not stable
 

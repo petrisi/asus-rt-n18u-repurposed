@@ -5,21 +5,50 @@
 Neither is urgent while the router is on an isolated bench segment, but both
 must happen before it carries anything real.
 
-- **Wi-Fi SSID and passphrase.** Currently whatever the QIS setup wizard was
-  given during firmware setup. If that was a throwaway value typed only to get
-  past the wizard, it is almost certainly weak and the SSID is not what you
-  want long term. Change both, or disable the radio entirely
-  (Wireless -> Professional -> Enable Radio: No) if this ends up wired-only.
-  The radio is the one part of this box OpenWrt could never replace, so if you
-  are not using it, turning it off costs nothing.
+- ~~**Wi-Fi SSID and passphrase.**~~ Done 2026-08-31. SSID kept, passphrase
+  replaced with a strong one.
 
-- **Admin password.** Still the value set during initial setup. The GUI is on
-  the LAN only and SSH is now key-only, so this is not the weakest link, but it
-  is still a shared secret in a wizard-shaped format.
+- ~~**Admin password.**~~ Done 2026-08-31, and verified end to end over both
+  the web API and telnet. See the note below — the obvious way to change it
+  does not work.
 
-Both are single GUI changes. They are listed here rather than done inline
-because changing them mid-build means re-authenticating every tool that was
-already working, for no gain while the box is on a bench.
+- **Dashboard authentication.** Still open: the portal runs unauthenticated on
+  the LAN and logs a NOTE saying so at every start. Create
+  `/jffs/portal/.htdigest` with realm `rtn18u` to enable it
+  (`docs/05-dashboard.md`).
+
+  Consider also whether the radio is wanted at all. No client has ever
+  associated; if the box is wired-only, disabling the radio
+  (Wireless -> Professional -> Enable Radio: No) closes more surface than any
+  passphrase, and makes the `wps_monitor`/udp-1900 question moot.
+
+## Changing the admin password: nvram alone does not work
+
+Recorded because it cost a debugging cycle. There are **three** places the
+credential lives:
+
+| store | used by | set how |
+|---|---|---|
+| `acc_list` (hashed) | ASUS `httpd` / web GUI | derived by httpd |
+| `/etc/shadow` (MD5-crypt) | telnet, `login` | regenerated at boot |
+| `http_passwd` | staging value only | what you post |
+
+`nvram set http_passwd=<plaintext>; nvram commit; service restart_httpd`
+appears to succeed and changes nothing — the old password keeps working,
+because httpd validates against `acc_list` and never re-derives it.
+
+The change must go through the GUI's own mechanism, which is what regenerates
+all three:
+
+    POST /start_apply.htm
+      action_mode=apply
+      action_script=restart_httpd
+      http_username=admin
+      http_passwd=<plaintext>
+      current_page=Advanced_System_Content.asp
+
+Verify by logging in with the new password *and* confirming the old one is
+refused — on both the web API and telnet, since they consult different stores.
 
 ## Not yet built
 

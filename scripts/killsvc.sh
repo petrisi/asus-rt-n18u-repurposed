@@ -22,7 +22,15 @@
 LOG=/jffs/killsvc.log
 LOCK=/tmp/killsvc.lock
 
-TARGETS="mastiff infosvr lld2d wpsaide u2ec lpd"
+#   - wps_monitor holds udp/1900 (WPS's UPnP external-registrar, nothing to do
+#     with miniupnpd). Setting wps_enable=0 does NOT stop it -- verified, it
+#     came straight back after restart_wireless -- so killing it is the only
+#     lever. It does not respawn once killed, and the radio keeps beaconing
+#     with eapd/nas/wlceventd untouched.
+#   - minidlna, miniupnpd, smbd and nmbd are NOT listed here: they have working
+#     nvram toggles (dms_enable, upnp_enable, enable_samba), which is a cleaner
+#     off switch than a kill loop. See docs/08-exposure.md.
+TARGETS="mastiff infosvr lld2d wpsaide wps_monitor u2ec lpd"
 
 # Once per boot. /tmp is tmpfs, so the lock clears itself.
 [ -f "$LOCK" ] && exit 0

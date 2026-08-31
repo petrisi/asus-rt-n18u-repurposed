@@ -29,7 +29,20 @@
 RUN=/tmp/portal
 STATUS="$RUN/status.json"
 USB_LABEL=ROUTERDATA
-USB_MP="/tmp/mnt/$USB_LABEL"
+# Resolve the volume's ACTUAL mountpoint rather than assuming /tmp/mnt/<LABEL>.
+#
+# The firmware's automounter sometimes lands the volume on "/tmp/mnt/<LABEL>(1)"
+# -- observed after a reboot, with nothing else mounted at the plain name. When
+# that happens a hardcoded path makes this script's mount check fail and it
+# exits silently: no feeding, no export, and the dashboard reports "no history"
+# while the databases sit intact a few characters away. services.sh has always
+# resolved dynamically, which is why SSH and Entware kept working through it.
+find_mp() {
+    _dev=$(blkid 2>/dev/null | grep "LABEL=\"$USB_LABEL\"" | cut -d: -f1)
+    [ -n "$_dev" ] || return 1
+    awk -v d="$_dev" '$1==d {print $2; exit}' /proc/mounts
+}
+USB_MP=$(find_mp)
 RRD_DIR="$USB_MP/rrd"
 SYS="$RRD_DIR/sys.rrd"
 NET="$RRD_DIR/net.rrd"
@@ -49,8 +62,8 @@ unset LD_LIBRARY_PATH LD_PRELOAD
 
 # --- guards: every one of these is a silent, successful no-op -------------
 [ -x "$RRDTOOL" ] || exit 0
-mountpoint_ok() { grep -q " $USB_MP " /proc/mounts 2>/dev/null; }
-mountpoint_ok || exit 0
+[ -n "$USB_MP" ] || exit 0
+grep -q " $USB_MP " /proc/mounts 2>/dev/null || exit 0
 mkdir -p "$RRD_DIR" 2>/dev/null || exit 0
 
 # --- schema ---------------------------------------------------------------

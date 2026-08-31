@@ -63,16 +63,54 @@ a bind address, use it — that is why `sshd_config` sets `ListenAddress` and wh
 the dashboard's lighttpd sets `server.bind` rather than relying on its iptables
 rule alone.
 
-### Worth closing
+### Closed on 2026-08-31
 
-- **minidlna (8200)** — running by default, not in `killsvc.sh`'s target list.
-  If you are not serving media, add `minidlna` to `TARGETS` in
-  [03-disable-telemetry.md](03-disable-telemetry.md).
-- **UPnP (1900)** — `miniupnpd` has a working GUI toggle (WAN → UPnP →
-  Disable). On an internet-facing box with no clients needing port mapping,
-  turn it off.
-- **Samba (137/138/139/445)** — `enable_samba=1`. The TCP ports are LAN-bound,
-  the UDP name service is not. Disable it in the GUI if no one uses the shares.
+All three now disabled by their proper nvram toggles rather than kill loops:
+
+    nvram set dms_enable=0        # minidlna, tcp/8200
+    nvram set upnp_enable=0       # miniupnpd
+    nvram set enable_samba=0      # smbd/nmbd, 137/138/139/445
+    nvram set daapd_enable=0
+    nvram commit
+    service stop_dms; service stop_upnp; service stop_samba
+
+Ports 8200, 137, 138, 139 and 445 all went quiet and stayed quiet across a
+reboot. Disabling UPnP does **not** affect the seedbox: Transmission has
+`port-forwarding-enabled: false` and uses the static iptables rules from
+[06-bittorrent.md](06-bittorrent.md) instead.
+
+### udp/1900 is WPS, not UPnP
+
+Stopping `miniupnpd` left udp/1900 still listening. Tracing the socket inode
+through `/proc/net/udp` to `/proc/<pid>/fd` identified the owner:
+
+    inode 852 -> pid 183 : /bin/wps_monitor
+
+`wps_monitor` implements WPS's UPnP external-registrar, which is a different
+thing from the IGD daemon and binds the same SSDP port. **Setting
+`wps_enable=0` does not stop it** — verified: it came straight back after
+`service restart_wireless`. Another instance of a setting whose presentation
+layer exists without the code behind it.
+
+Killing it works and it does not respawn, so `wps_monitor` is in `TARGETS` in
+`scripts/killsvc.sh`. The radio keeps beaconing (`wl bss` = up, `wl isup` = 1)
+with `eapd`, `nas` and `wlceventd` untouched.
+
+**Caveat worth knowing:** that was verified with **zero clients associated**, so
+while the radio is demonstrably up, client authentication was not exercised. If
+you use the Wi-Fi, connect something and confirm before trusting it. WPS is
+disabled either way, which on an internet-facing router is a gain in itself.
+
+### Still broadly bound
+
+    tcp  18017, 3394, 5473      ASUS services
+    udp  18018, 5353 (mDNS/avahi), 5355 (LLMNR), 5474
+    udp  37000, 38000, 42000, 43000, 59000, 60566   ASUS services
+    udp  67                     DHCP server
+
+None reachable from the WAN — the catch-all DROP covers them — but they remain
+one rule away. `avahi-daemon` (5353) is the obvious next candidate if you do
+not need mDNS service discovery on the LAN.
 
 ## IPv6
 
