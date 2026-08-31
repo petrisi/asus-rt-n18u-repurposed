@@ -319,6 +319,23 @@ The increment is real inside the subshell and gone afterwards, so every call
 built the *same* "unique" filename. Use `mktemp` when you need a distinct path
 from a function that is normally called in a command substitution.
 
+## An awk END block fires on empty input — so a failed pipe looks like real data
+
+    _o=$(maybe_fails | awk '... END { printf "%d ...", n+0; printf "[%s]", arr }')
+
+If the command produced nothing, awk still runs `END` and emits a
+well-formed record full of zeros. Piped straight into a consumer that only
+checks "did I get output", a **failed call is indistinguishable from a genuine
+empty result** — here it overwrote a good sample and the dashboard reported
+`ok=1`, a fresh timestamp, and zero torrents while four were running.
+
+Capture the raw output first and require evidence that the command actually
+answered, before parsing:
+
+    _raw=$(maybe_fails)
+    case "$_raw" in *"  Id: "*) : ;; *) return 0 ;; esac   # keep the last good
+    _o=$(printf '%s\n' "$_raw" | awk '...')
+
 ## Not every slow command has a ceiling worth picking
 
 `transmission-remote` against a busy daemon measured >10s repeatedly and 0.5s

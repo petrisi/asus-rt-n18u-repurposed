@@ -150,7 +150,25 @@ bt_probe() {
     mkdir "$BT_LOCK" 2>/dev/null || return 0     # one probe at a time
     _auth=$(cat "$TR_CREDS" 2>/dev/null)
     if [ -n "$_auth" ]; then
-        _o=$(run_to 200 "$TR_BIN" "$TR_RPC" -n "$_auth" -t all -i 2>/dev/null | awk '
+        # Capture the RAW output first and require it to be non-empty.
+        #
+        # The awk below emits its END block unconditionally, so parsing empty
+        # input yields a perfectly well-formed "zero torrents" record. Piping
+        # a failed call straight into it therefore OVERWROTE the last good
+        # sample with zeros -- the dashboard showed ok=1, a fresh age, and no
+        # torrents while four were running. A failed call must leave the
+        # previous sample alone.
+        # 60s ceiling, not 20. The probe is detached and holds a lock, so a
+        # slow call delays nothing and cannot overlap itself -- the only cost
+        # of waiting is a staler sample, and the only cost of giving up early
+        # is no sample at all. At 20s most calls were being killed and the
+        # last good sample aged past two minutes.
+        _raw=$(run_to 600 "$TR_BIN" "$TR_RPC" -n "$_auth" -t all -i 2>/dev/null)
+        case "$_raw" in
+            *"  Id: "*) : ;;                      # real listing, parse it
+            *) rmdir "$BT_LOCK" 2>/dev/null; return 0 ;;   # failed: keep last good
+        esac
+        _o=$(printf '%s\n' "$_raw" | awk '
         function jesc(v) { gsub(/\\/, "\\\\", v); gsub(/"/, "\\\"", v)
                            gsub(/[\t\r]/, " ", v); return v }
         function num(v)  { sub(/^[^:]*: */, "", v); return v + 0 }
