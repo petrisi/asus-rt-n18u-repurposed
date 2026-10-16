@@ -237,6 +237,28 @@ with three days of frozen graphs. Both are cheap, so check both. Verified by
 `kill -9` (restarted in 31 s) and by `kill -STOP`, which leaves the process in
 the table while it stops writing — the exact shape of the original outage.
 
+**And something must watch the supervisor.** On 2026-10-05 `portal_start.sh`
+itself exited after 35 days, with no log line. Its collector followed 14 hours
+later, and the page then served frozen data for eleven days. Two gaps made
+that possible:
+
+- **stderr went to `/dev/null`.** busybox `ash` prints its fatal errors there
+  (a failed fork, an arithmetic syntax error) and then exits through the EXIT
+  trap, which cleans the lock and says nothing else. The supervisor now
+  redirects its own stderr, and the collector's, to `/tmp/portal/portal.err`
+  (capped at 64 KB), and the EXIT trap logs the exit status.
+- **Nothing restarted it.** `services.sh` already loops for the life of the
+  boot, so it now starts `portal_start.sh` whenever it is absent (after 180 s
+  of uptime, leaving boot to `usbmount.sh`). The supervisor's own lock makes a
+  duplicate start harmless. Verified by `kill`: the exit was logged as status
+  143 and the watchdog restarted the supervisor 19 s later.
+
+The root cause of the October exit is still unknown. One candidate:
+this kernel runs strict overcommit (`vm.overcommit_memory=2`, `CommitLimit`
+~128 MB, no swap), so `fork()` can fail with ENOMEM well before RAM is
+actually exhausted. That is fatal in `ash`. The next occurrence should
+leave its message in `portal.err`.
+
 **Bound everything that reads `/proc` or calls `wl`.** `wl` ioctls can block
 indefinitely against this driver. A blocked collector does not crash — it
 freezes every number on the page at once, which is a much harder failure to

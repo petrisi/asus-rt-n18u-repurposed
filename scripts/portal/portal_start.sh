@@ -27,7 +27,18 @@ POLL=30
 LANIP=$(nvram get lan_ipaddr 2>/dev/null); [ -z "$LANIP" ] && LANIP=192.168.1.1
 WANIF=$(nvram get wan0_ifname 2>/dev/null); [ -z "$WANIF" ] && WANIF=eth0
 
+ERR="$RUN/portal.err"            # stderr of this script and of the collector
+ERR_MAX=65536
+
 mkdir -p "$RUN"
+
+# Keep stderr. usbmount.sh launches this with 2>/dev/null, and busybox ash
+# reports its fatal errors (a failed fork, an arithmetic syntax error) on
+# stderr and then exits -- running the EXIT trap, so the lock is cleaned up
+# and nothing else is said. On 2026-10-05 the supervisor died exactly that
+# way, and the collector it should have restarted followed 14h later; the
+# dashboard then served frozen data for eleven days with no trace of why.
+exec 2>>"$ERR"
 
 log() { echo "$(date '+%F %T') $*" >> "$RUN/portal.log"; }
 
@@ -41,10 +52,12 @@ if ! mkdir "$RUN/.portal.lock.d" 2>/dev/null; then
 fi
 # See services.sh: a TERM handler that returns without exiting leaves the
 # process alive but unlocked, which lets a duplicate start.
-_cleanup() { rmdir "$RUN/.portal.lock.d" 2>/dev/null; }
+# The EXIT trap also records the exit status: this loop never ends on its own,
+# so any exit at all is a fault worth a log line.
+_cleanup() { _rc=$?; log "portal_start.sh exiting, status $_rc"; rmdir "$RUN/.portal.lock.d" 2>/dev/null; }
 trap '_cleanup' EXIT
-trap '_cleanup; exit 143' TERM
-trap '_cleanup; exit 130' INT
+trap 'log "caught TERM"; exit 143' TERM
+trap 'log "caught INT"; exit 130' INT
 
 # lighttpd modules live in /usr/lib on this firmware, NOT /usr/lib/lighttpd,
 # which is the default the binary would otherwise look in.
@@ -165,7 +178,9 @@ collector_running() { pidof portal_collector.sh >/dev/null 2>&1; }
 
 start_collector() {
     [ -x "$PORTAL/portal_collector.sh" ] || { log "collector missing"; return 1; }
-    nohup "$PORTAL/portal_collector.sh" >/dev/null 2>&1 &
+    # stderr kept for the same reason as ours; the collector is silent there
+    # in normal operation (measured: 0 bytes over a slow-path cycle).
+    nohup "$PORTAL/portal_collector.sh" >/dev/null 2>>"$ERR" &
     log "collector started, pid $!"
 }
 
@@ -248,4 +263,11 @@ while :; do
 
     ensure_rrd
     ensure_fw
+
+    # Bound the error log: it lives in tmpfs, and a command that starts
+    # complaining every 2s would otherwise grow it for the life of the boot.
+    if [ -f "$ERR" ] && [ "$(wc -c < "$ERR")" -gt "$ERR_MAX" ]; then
+        tail -c $((ERR_MAX / 2)) "$ERR" > "$ERR.tmp" && cat "$ERR.tmp" > "$ERR"
+        rm -f "$ERR.tmp"
+    fi
 done

@@ -152,6 +152,20 @@ ensure_sshd() {
     pidof sshd >/dev/null 2>&1
 }
 
+# The portal supervisor watches the collector, but nothing watched the
+# supervisor. On 2026-10-05 it exited silently and the dashboard served frozen
+# data for eleven days. This loop already runs for the life of the boot, so it
+# takes that job. Safe to call repeatedly: portal_start.sh holds its own
+# single-instance lock, taken before it touches anything.
+ensure_portal() {
+    [ -x /jffs/portal/portal_start.sh ] || return 0
+    pidof portal_start.sh >/dev/null 2>&1 && return 0
+    # usbmount.sh starts it 55s after the hook fires; leave boot to that path.
+    awk '{ exit !($1 > 180) }' /proc/uptime || return 0
+    log "portal_start.sh not running, starting it"
+    /jffs/portal/portal_start.sh >/dev/null 2>&1 </dev/null &
+}
+
 log "=== services start, uptime $(cut -d' ' -f1 /proc/uptime) ==="
 
 # Wait for br0 to hold the LAN address: sshd binds it explicitly.
@@ -181,6 +195,8 @@ while :; do
             ensure_sshd
         fi
     fi
+
+    ensure_portal
 
     # Converged = /opt bound and sshd actually running.
     if grep -q " /tmp/opt " /proc/mounts 2>/dev/null && pidof sshd >/dev/null 2>&1; then
